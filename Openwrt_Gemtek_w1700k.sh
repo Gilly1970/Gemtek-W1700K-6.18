@@ -26,14 +26,12 @@ fi
 # --- Main Configuration ---
 
 # OpenWrt Source Details
-# airoha-6.18-work is on hurrian's fork (PR #21019 against openwrt/openwrt)
-readonly OPENWRT_REPO="https://github.com/hurrian/openwrt-w1700k.git"
+readonly OPENWRT_REPO="https://github.com/openwrt/openwrt.git"
 # --- Use this line for local testing (uncomment and set your path) ---
 #readonly OPENWRT_REPO="/home/user/openwrt/repos/openwrt"
 
-OPENWRT_BRANCH="airoha-6.18-work"
-# Bumped 2026-05-28 to pick up the 2026-05-26 rebase (38 upstreamed backports dropped, kmod-phy-realtek switch for W1700K, PERST/CPUFreq fixes, config refresh).
-readonly OPENWRT_COMMIT="68ee6ece3c3b661ca13049260cbb337557a0be70"
+OPENWRT_BRANCH="master"
+readonly OPENWRT_COMMIT="603c95f30b8c0b1683071370bda955f67b715884"
 
 ### e94906eaf0c84e64e0fc3dd6b267d63252ac705b
 
