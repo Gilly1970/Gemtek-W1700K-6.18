@@ -1,0 +1,5 @@
+# Patches removed from the upstream airoha-6.18-work tree before our patches are applied
+
+# Replaced by 736-net-phy-realtek-add-5G-and-10G-PHY-support.patch (PR #22563 firmware-based driver)
+# 735 uses the old Vendor SDK approach (rtl8261n/ subdir); 736 uses the upstream realtek/ phy_patch engine
+target/linux/generic/hack-6.18/735-net-phy-realtek-rtl8261n.patch

@@ -1,0 +1,72 @@
+From 36001685bf39bd30b049d6359cc1c584107ea09e Mon Sep 17 00:00:00 2001
+From: Gilly1970 <gilroyscott@hotmail.com>
+Date: Fri, 13 Mar 2026 00:30:46 +1000
+Subject: [PATCH] 999-memory-storage-bar-adjust
+
+---
+ .../luci-static/resources/view/status/include/20_memory.js  | 6 ++++--
+ .../luci-static/resources/view/status/include/25_storage.js | 6 ++++--
+ 2 files changed, 8 insertions(+), 4 deletions(-)
+
+diff --git a/htdocs/luci-static/resources/view/status/include/20_memory.js b/htdocs/luci-static/resources/view/status/include/20_memory.js
+index 0a885c0..f8c10a9 100644
+--- a/htdocs/luci-static/resources/view/status/include/20_memory.js
++++ b/htdocs/luci-static/resources/view/status/include/20_memory.js
+@@ -12,11 +12,13 @@ function progressbar(value, max, byte) {
+ 	    mn = parseInt(max) || 100,
+ 	    fv = byte ? String.format('%1024.2mB', value) : value,
+ 	    fm = byte ? String.format('%1024.2mB', max) : max,
+-	    pc = Math.floor((100 / mn) * vn);
++	    pc = (mn > 0) ? Math.max(0, Math.min(100, Math.round((1000 / mn) * vn) / 10)) : 0;
++
++	if (vn > 0 && pc < 0.1) pc = 0.1;
+ 
+ 	return E('div', {
+ 		'class': 'cbi-progressbar',
+-		'title': '%s / %s (%d%%)'.format(fv, fm, pc)
++		'title': '%s / %s (%.1f%%)'.format(fv, fm, pc)
+ 	}, E('div', { 'style': 'width:%.2f%%'.format(pc) }));
+ }
+ 
+diff --git a/htdocs/luci-static/resources/view/status/include/25_storage.js b/htdocs/luci-static/resources/view/status/include/25_storage.js
+index 60661f6..d9ea38e 100644
+--- a/htdocs/luci-static/resources/view/status/include/25_storage.js
++++ b/htdocs/luci-static/resources/view/status/include/25_storage.js
+@@ -26,11 +26,13 @@ function progressbar(value, max, byte) {
+ 	    mn = parseInt(max) || 100,
+ 	    fv = byte ? String.format('%1024.2mB', value) : value,
+ 	    fm = byte ? String.format('%1024.2mB', max) : max,
+-	    pc = Math.floor((100 / mn) * vn);
++	    pc = (mn > 0) ? Math.max(0, Math.min(100, Math.round((1000 / mn) * vn) / 10)) : 0;
++
++	if (vn > 0 && pc < 0.1) pc = 0.1;
+ 
+ 	return E('div', {
+ 		'class': 'cbi-progressbar',
+-		'title': '%s / %s (%d%%)'.format(fv, fm, pc)
++		'title': '%s / %s (%.1f%%)'.format(fv, fm, pc)
+ 	}, E('div', { 'style': 'width:%.2f%%'.format(pc) }));
+ }
+ 
+diff --git a/htdocs/luci-static/resources/view/status/include/30_network.js b/htdocs/luci-static/resources/view/status/include/30_network.js
+index 723b73d..2f39199 100644
+--- a/htdocs/luci-static/resources/view/status/include/30_network.js
++++ b/htdocs/luci-static/resources/view/status/include/30_network.js
+@@ -19,11 +19,13 @@ function progressbar(value, max, byte) {
+ 	const mn = parseInt(max) || 100;
+ 	const fv = byte ? String.format('%1024.2mB', value) : value;
+ 	const fm = byte ? String.format('%1024.2mB', max) : max;
+-	const pc = Math.floor((100 / mn) * vn);
++	let pc = (mn > 0) ? Math.max(0, Math.min(100, Math.round((1000 / mn) * vn) / 10)) : 0;
++
++	if (vn > 0 && pc < 0.1) pc = 0.1;
+ 
+ 	return E('div', {
+ 		'class': 'cbi-progressbar',
+-		'title': '%s / %s (%d%%)'.format(fv, fm, pc)
++		'title': '%s / %s (%.1f%%)'.format(fv, fm, pc)
+ 	}, E('div', { 'style': 'width:%.2f%%'.format(pc) }));
+ }
+ 
+-- 
+2.43.0

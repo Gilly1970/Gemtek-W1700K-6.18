@@ -1,0 +1,25 @@
+From: OpenWrt W1700K build
+Subject: [PATCH] pmdomain: mediatek: allow AIROHA_CPU_PM_DOMAIN under ARCH_AIROHA
+
+The drivers/pmdomain/mediatek/Kconfig menu is gated on ARCH_MEDIATEK,
+which hides AIROHA_CPU_PM_DOMAIN (the Airoha CPU PM domain driver living
+in this directory for historical reasons) on Airoha SoCs that set
+ARCH_AIROHA but not ARCH_MEDIATEK.
+
+Without this driver, the airoha-cpufreq driver cannot attach an OPP-set
+PM domain to cpu0 and defers probe forever, leaving CPUs at the
+boot-default 1.2 GHz on Airoha EN7581 / AN7581 platforms (W1700K etc).
+
+Widen the menu dependency to also accept ARCH_AIROHA.
+
+--- a/drivers/pmdomain/mediatek/Kconfig
++++ b/drivers/pmdomain/mediatek/Kconfig
+@@ -1,7 +1,7 @@
+ # SPDX-License-Identifier: GPL-2.0-only
+
+ menu "MediaTek PM Domains"
+-	depends on ARCH_MEDIATEK || COMPILE_TEST
++	depends on ARCH_MEDIATEK || ARCH_AIROHA || COMPILE_TEST
+
+ config MTK_SCPSYS
+ 	bool "MediaTek SCPSYS Support"

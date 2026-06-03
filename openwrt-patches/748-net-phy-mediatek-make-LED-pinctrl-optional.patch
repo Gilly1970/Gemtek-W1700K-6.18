@@ -1,0 +1,65 @@
+From: Gilly <gilroyscott1970@gmail.com>
+Date: Mon, 25 May 2026 00:00:00 +1000
+Subject: [PATCH] net: phy: mediatek: make PHY LED pinctrl optional
+
+The AN7581 and MT7988 SoC PHY drivers unconditionally call
+devm_pinctrl_get_select(&phydev->mdio.dev, "gbe-led") and log an
+error at <3> priority when it fails. This is wrong for two reasons:
+
+1. The LED pinctrl is optional. Boards that drive PHY
+   LEDs via GPIO (e.g. Gemtek W1700K) intentionally omit any
+   pinctrl-0 reference. In that case devm_pinctrl_get_select()
+   returns -ENODEV which is not an error -- it just means "no LED
+   pinctrl configured." Logging dev_err here is noisy and
+   misleading.
+
+2. Even when a pinctrl-0 IS referenced but fails (e.g. the muxed
+   target pin is already claimed by another driver), the failure
+   is non-fatal -- the PHY still probes and traffic still flows.
+   Only the LED routing is unconfigured. dev_warn is more
+   appropriate than dev_err for this case.
+---
+--- a/drivers/net/phy/mediatek/mtk-ge-soc.c
++++ b/drivers/net/phy/mediatek/mtk-ge-soc.c
+@@ -1310,9 +1310,17 @@ static int mt7988_phy_fix_leds_polariti
+ 
+ 	/* Only now setup pinctrl to avoid bogus blinking */
+ 	pinctrl = devm_pinctrl_get_select(&phydev->mdio.dev, "gbe-led");
+-	if (IS_ERR(pinctrl))
+-		dev_err(&phydev->mdio.bus->dev,
+-			"Failed to setup PHY LED pinctrl\n");
++	if (IS_ERR(pinctrl)) {
++		int err = PTR_ERR(pinctrl);
++
++		/* -ENODEV: no pinctrl-0 in DT, LEDs driven by GPIO or not
++		 * used. Stay silent. Other errors are real misconfiguration.
++		 */
++		if (err != -ENODEV)
++			dev_warn(&phydev->mdio.bus->dev,
++				 "Failed to setup PHY LED pinctrl (%pe), LEDs disabled\n",
++				 pinctrl);
++	}
+ 
+ 	return 0;
+ }
+@@ -1415,9 +1423,17 @@ static int an7581_phy_probe(struct phy_
+ 
+ 	/* Toggle pinctrl to enable PHY LED */
+ 	pinctrl = devm_pinctrl_get_select(&phydev->mdio.dev, "gbe-led");
+-	if (IS_ERR(pinctrl))
+-		dev_err(&phydev->mdio.bus->dev,
+-			"Failed to setup PHY LED pinctrl\n");
++	if (IS_ERR(pinctrl)) {
++		int err = PTR_ERR(pinctrl);
++
++		/* -ENODEV: no pinctrl-0 in DT, LEDs driven by GPIO or not
++		 * used. Stay silent. Other errors are real misconfiguration.
++		 */
++		if (err != -ENODEV)
++			dev_warn(&phydev->mdio.bus->dev,
++				 "Failed to setup PHY LED pinctrl (%pe), LEDs disabled\n",
++				 pinctrl);
++	}
+ 
+ 	priv = devm_kzalloc(&phydev->mdio.dev, sizeof(*priv), GFP_KERNEL);
+ 	if (!priv)

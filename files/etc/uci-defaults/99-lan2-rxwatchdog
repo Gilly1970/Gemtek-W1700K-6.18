@@ -1,0 +1,6 @@
+#!/bin/sh
+# Enable the lan2 RX watchdog on first boot
+chmod +x /etc/init.d/lan2-rxwatchdog 2>/dev/null
+chmod +x /usr/libexec/lan2-rxwatchdog 2>/dev/null
+/etc/init.d/lan2-rxwatchdog enable 2>/dev/null
+exit 0

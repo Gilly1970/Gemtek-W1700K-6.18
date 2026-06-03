@@ -1,0 +1,19 @@
+#!/bin/sh /etc/rc.common
+START=99
+USE_PROCD=1
+
+start_service() {
+    procd_open_instance
+    procd_set_param command /bin/sh -c '
+        while true; do
+            # Full scan to catch new devices and refresh hostnames in LuCI
+            arp-scan -qxlN -I br-lan | awk "{print \$1}" | \
+                xargs -r fping -q -c1
+            sleep 300
+        done
+    '
+    procd_set_param respawn
+    procd_set_param stdout 0
+    procd_set_param stderr 0
+    procd_close_instance
+}

@@ -1,0 +1,8 @@
+# lan2-rxwatchdog config - sourced as shell vars
+# ENABLED=1       enable/disable the watchdog (1/0)
+# WAIT_SECS=45    seconds to wait after boot before checking
+# MAX_ATTEMPTS=10 max consecutive reboots before giving up
+
+ENABLED=1
+WAIT_SECS=45
+MAX_ATTEMPTS=10

@@ -1,0 +1,81 @@
+#!/bin/sh
+# lan2-rxwatchdog: detect AN7581 GDM4 RX stuck-at-zero on boot and reboot
+# to retry. Workaround for the intermittent USXGMII bringup bug where
+# Linux's PCS bringup leaves the RX data path stuck on ~80% of boots.
+# Only a fresh boot can clear the state.
+
+CONFIG=/etc/config/lan2-rxwatchdog
+COUNTER_FILE=/etc/.lan2-rx-attempts
+PASS_MARKER=/tmp/.lan2-rx-passed
+RX_REG=0x1fb52648
+
+# Idempotency guard: if we already passed this boot, do nothing.
+# /tmp is tmpfs so the marker is cleared on reboot.
+if [ -e "$PASS_MARKER" ]; then
+    logger -t lan2-rxwatchdog "already passed this boot, exiting"
+    exit 0
+fi
+
+# Defaults (overridable via /etc/config/lan2-rxwatchdog)
+ENABLED=1
+MAX_ATTEMPTS=10
+WAIT_SECS=45
+
+# Load config if present (simple key=value, no UCI dependency)
+if [ -f "$CONFIG" ]; then
+    . "$CONFIG"
+fi
+
+if [ "$ENABLED" != "1" ]; then
+    logger -t lan2-rxwatchdog "disabled in config, exiting"
+    exit 0
+fi
+
+logger -t lan2-rxwatchdog "started, waiting ${WAIT_SECS}s for link to settle"
+sleep "$WAIT_SECS"
+
+# Skip if no cable plugged in / no carrier - port isn't in use,
+# don't punish the user with reboots when they're not using it.
+CARRIER=$(cat /sys/class/net/lan2/carrier 2>/dev/null)
+if [ "$CARRIER" != "1" ]; then
+    logger -t lan2-rxwatchdog "lan2 carrier=$CARRIER (cable unplugged or link down), skipping"
+    rm -f "$COUNTER_FILE"
+    exit 0
+fi
+
+# Read GDM4 RX-OK packet counter via devmem
+RX=$(devmem "$RX_REG" 2>/dev/null)
+if [ -z "$RX" ]; then
+    logger -t lan2-rxwatchdog "ERROR: devmem read of $RX_REG failed - giving up"
+    exit 1
+fi
+
+# Read attempt counter (persists across reboots)
+ATTEMPTS=0
+if [ -f "$COUNTER_FILE" ]; then
+    ATTEMPTS=$(cat "$COUNTER_FILE" 2>/dev/null)
+    [ -z "$ATTEMPTS" ] && ATTEMPTS=0
+fi
+
+if [ "$RX" = "0x00000000" ]; then
+    # FAIL state - GDM4 hasn't seen any frames
+    ATTEMPTS=$((ATTEMPTS + 1))
+    if [ "$ATTEMPTS" -gt "$MAX_ATTEMPTS" ]; then
+        logger -t lan2-rxwatchdog "FAIL but max retries ($MAX_ATTEMPTS) exceeded, giving up - rm $COUNTER_FILE to reset"
+        exit 1
+    fi
+    echo "$ATTEMPTS" > "$COUNTER_FILE"
+    sync
+    logger -t lan2-rxwatchdog "FAIL detected (attempt $ATTEMPTS/$MAX_ATTEMPTS, GDM4_RX=$RX), rebooting in 3s"
+    sleep 3
+    reboot
+else
+    # PASS state - GDM4 is receiving
+    touch "$PASS_MARKER"
+    if [ "$ATTEMPTS" -gt 0 ]; then
+        logger -t lan2-rxwatchdog "PASS after $ATTEMPTS reboot(s), GDM4_RX=$RX"
+        rm -f "$COUNTER_FILE"
+    else
+        logger -t lan2-rxwatchdog "PASS on first try, GDM4_RX=$RX"
+    fi
+fi

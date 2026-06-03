@@ -1,0 +1,70 @@
+CONFIG_TARGET_airoha=y
+CONFIG_TARGET_airoha_an7581=y
+CONFIG_TARGET_airoha_an7581_DEVICE_gemtek_w1700k-ubi2=y
+
+CONFIG_BUSYBOX_CUSTOM=y
+CONFIG_KERNEL_DEVMEM=y
+CONFIG_BUSYBOX_CONFIG_DEVMEM=y
+CONFIG_BUSYBOX_DEFAULT_DEVMEM=y
+
+# LuCI
+
+CONFIG_PACKAGE_luci=y
+CONFIG_PACKAGE_luci-light=y
+CONFIG_PACKAGE_luci-ssl=y
+
+# CONFIG_PACKAGE_dnsmasq is not set
+CONFIG_PACKAGE_dnsmasq-full=y
+
+# 3. Applications
+
+CONFIG_PACKAGE_luci-app-airoha-flowsense=y
+CONFIG_PACKAGE_luci-app-log-viewer=y
+CONFIG_PACKAGE_luci-app-w1700k-fancontrol=y
+CONFIG_PACKAGE_luci-app-watchcat=y
+
+# 4. Themes
+
+CONFIG_PACKAGE_luci-theme-bootstrap=y
+
+# Network Support
+
+CONFIG_PACKAGE_kmod-sched-bpf=m
+CONFIG_PACKAGE_kmod-sched-cake=m
+CONFIG_PACKAGE_kmod-sched-core=m
+CONFIG_PACKAGE_kmod-sched-flower=m
+
+# Network Support
+
+CONFIG_PACKAGE_kmod-br-netfilter=y
+
+# SSH
+
+CONFIG_PACKAGE_openssh-sftp-server=y
+
+# Editors
+
+CONFIG_PACKAGE_nano=y
+
+# VPN
+
+CONFIG_PACKAGE_kmod-wireguard=m
+CONFIG_PACKAGE_luci-proto-wireguard=m
+CONFIG_PACKAGE_wireguard-tools=m
+
+# arp-scan
+
+CONFIG_PACKAGE_arp-scan=y
+CONFIG_PACKAGE_fping=y
+CONFIG_PACKAGE_iperf3=y
+
+CONFIG_PACKAGE_debugfs=y
+CONFIG_PACKAGE_ethtool-full=y
+CONFIG_PACKAGE_wget-ssl=y
+
+CONFIG_TESTING_KERNEL=y
+
+CONFIG_PACKAGE_kmod-phy-realtek=y
+CONFIG_PACKAGE_rtl8261n-firmware=y
+
+CONFIG_PACKAGE_u-boot-an7581_gemtek_w1700k=y

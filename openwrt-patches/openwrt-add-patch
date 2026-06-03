@@ -1,0 +1,85 @@
+package/firmware/wireless-regdb/patches/555-US-fix.patch
+package/firmware/wireless-regdb/patches/700-Ozzie-320_Mhz-fix.patch
+
+### Change from 0% to 0.0% in luci status overview bars
+feeds/luci/modules/luci-mod-status/patches/999-memory-storage-bar-adjust.patch
+
+### Bake NPU firmware into kernel image so airoha-npu probes succeed before rootfs mount (silences en7581_MT7996_npu_rv32.bin -2 / -ENOENT early-boot retry)
+firmware/airoha/en7581_MT7996_npu_rv32.bin:target/linux/airoha/files/firmware/airoha/en7581_MT7996_npu_rv32.bin
+firmware/airoha/en7581_MT7996_npu_data.bin:target/linux/airoha/files/firmware/airoha/en7581_MT7996_npu_data.bin
+
+### Fix BE 6GHz band not showing in luci on fresh install
+package/firmware/wireless-regdb/patches/600-world-regd-6GHz.patch
+
+### mt76 patches
+package/kernel/mt76/patches/008-wifi-mt76-mt7996-Fix-NULL-pointer-dereference-in-mt7996_init_tx_queues.patch
+
+### Lorenzo Bianconi mt76 mt7996 fixes (2026-05-31)
+package/kernel/mt76/patches/011-wifi-mt76-mt7996-Fix-possible-NULL-pointer-dereference-in-mt7996_mac_write_txwi_80211.patch
+package/kernel/mt76/patches/012-wifi-mt76-mt7996-Fix-possible-token-leak-in-mt7996_tx_prepare_skb.patch
+package/kernel/mt76/patches/013-v2-wifi-mt76-mt7996-fix-reading-zeroed-info-control-flags.patch
+
+### fix RTL8261N PHY boot failure
+an7581-w1700k-ubi2.dts:target/linux/airoha/dts/an7581-w1700k-ubi2.dts
+
+### fix cpufreq and PM domain drivers for AN7581
+target/linux/airoha/dts/an7581.dtsi
+
+### unblock AIROHA_CPU_PM_DOMAIN
+041-pmdomain-mediatek-allow-airoha-on-ARCH_AIROHA.patch:target/linux/airoha/patches-6.18/041-pmdomain-mediatek-allow-airoha-on-ARCH_AIROHA.patch
+
+### airoha-cpufreq + pmdomain rewrite for W1700K
+802-OPP-Provide-old-opp-to-config_clks-on-_set_opp.patch:target/linux/generic/pending-6.18/802-OPP-Provide-old-opp-to-config_clks-on-_set_opp.patch
+999-02-01-cpufreq-airoha-Add-EN7581-CPUFreq-SMCCC-driver.patch:target/linux/airoha/patches-6.18/999-02-01-cpufreq-airoha-Add-EN7581-CPUFreq-SMCCC-driver.patch
+999-02-01-pmdomain-airoha-Add-Airoha-CPU-PM-Domain-support.patch:target/linux/airoha/patches-6.18/999-02-01-pmdomain-airoha-Add-Airoha-CPU-PM-Domain-support.patch
+
+### make PHY LED pinctrl optional when no pinctrl-0 in DT
+748-net-phy-mediatek-make-LED-pinctrl-optional.patch:target/linux/airoha/patches-6.18/748-net-phy-mediatek-make-LED-pinctrl-optional.patch
+
+### Fix setup of non-80MHz 802.11s mesh interfaces on EHT hardware
+package/network/config/wifi-scripts/files-ucode/usr/share/ucode/wifi/supplicant.uc
+package/network/services/hostapd/patches/602-allow-config-EHT-rate.patch
+
+### L2 bridge offload kernel support
+target/linux/generic/pending-6.18/675-01-net-export-__dev_fill_forward_path-and-br_fdb_find_rcu.patch
+target/linux/generic/pending-6.18/675-02-nft_flow_offload-add-bridging-support.patch
+target/linux/generic/pending-6.18/675-03-nft_flow_offload-add-DEV_PATH_MTK_WDMA-path.patch
+target/linux/generic/pending-6.18/675-04-nft_flow_offload-add-vlan-passthrough-support.patch
+target/linux/generic/hack-6.18/721-net-add-packet-mangeling.patch
+target/linux/generic/pending-6.18/700-netfilter-nft_flow_offload-handle-netdevice-events-f.patch
+
+### br_netfilter skb_cow_head guard — required when 675-xx are active on 6.18
+target/linux/generic/pending-6.18/991-net-neigh-Reallocate-headroom-if-necessary-in-neigh_.patch
+
+### nf_flowtable: fix offloaded conntrack timeout extension (cmpxchg compared wrong value, never succeeded)
+v2-net-netfilter-flowtable-fix-offloaded-ct-timeout-never-being-extended.patch:target/linux/generic/pending-6.18/701-netfilter-flowtable-fix-offloaded-ct-timeout-never-being-extended.patch
+
+### airoha driver fixes ahead of upstream 6.18 (apply pre-existing patches that aren't yet in the kernel 6.18.x ships)
+628-net-airoha-Wait-for-TX-to-complete-in-airoha_dev_stop.patch:target/linux/airoha/patches-6.18/628-net-airoha-Wait-for-TX-to-complete-in-airoha_dev_stop.patch
+634-net-airoha-ppe-Init-PPE-hw-at-tc-block-bind-for-bridge-mode.patch:target/linux/airoha/patches-6.18/941-net-airoha-ppe-Init-PPE-hw-at-tc-block-bind-for-bridge-mode.patch
+
+
+### enable bridge offload for AN7581 target
+target/linux/airoha/an7581/target.mk
+target/linux/airoha/base-files/etc/sysctl.d/13-nf-bridge.conf
+
+### hostapd: mtk: 6G band does not require DFS
+package/network/config/wifi-scripts/patches/010-wifi-scripts-enable-EHT-beamforming-by-default.patch
+package/network/services/hostapd/patches/015-mtk-hostapd-mtk-6G-band-does-not-require-DFS.patch
+
+### wifi: mt76: mt7996: fix capability of EHT-MCS 15 in MRU
+package/kernel/mac80211/patches/subsys/372-wifi-cfg80211-fix-definition-of-EHT-MCS-15-in-MRU.patch
+package/kernel/mac80211/patches/subsys/373-wifi-mac80211-fix-missing-ieee80211_eml_params-membe.patch
+package/kernel/mt76/patches/0005-wifi-mt76-mt7996-fix-capability-of-EHT-MCS-15-in-MRU.patch
+
+### Extends manual RX calibration to E2 silicon (PRODUCT_ID=2). HW.1.1 has E2 silicon
+target/linux/airoha/patches-6.18/745-net-pcs-airoha-extend-manual-rx-calib-to-E2-silicon.patch
+
+### mt7530: pre-deassert PHY reset GPIOs before MDIO bus scan.
+target/linux/airoha/patches-6.18/746-net-dsa-mt7530-pre-deassert-phy-reset-gpios-before-mdio-scan.patch
+
+### an7581.mk — W1700K DEVICE_PACKAGES updated to kmod-phy-realtek + rtl8261n-firmware
+an7581.mk:target/linux/airoha/image/an7581.mk
+
+### Enable CONFIG_REALTEK_PHY=m for airoha an7581 target
+config-6.18:target/linux/airoha/an7581/config-6.18

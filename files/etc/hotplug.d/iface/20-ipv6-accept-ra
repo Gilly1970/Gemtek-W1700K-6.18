@@ -1,0 +1,5 @@
+#!/bin/sh
+# Enable RA acceptance on br-lan so IPv6 default route is learned from upstream.
+# Needs accept_ra=2 (not 1) because br-lan has IPv6 forwarding enabled.
+[ "$ACTION" = "ifup" ] && [ "$INTERFACE" = "lan" ] && \
+    sysctl -w net.ipv6.conf.br-lan.accept_ra=2
