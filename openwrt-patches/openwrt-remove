@@ -3,3 +3,9 @@
 # Replaced by 736-net-phy-realtek-add-5G-and-10G-PHY-support.patch (PR #22563 firmware-based driver)
 # 735 uses the old Vendor SDK approach (rtl8261n/ subdir); 736 uses the upstream realtek/ phy_patch engine
 target/linux/generic/hack-6.18/735-net-phy-realtek-rtl8261n.patch
+
+# MT76 BISECT (2026-06-03): when bumping mt76 to post-March-21 source, the stock 002 hrtimer_setup patch is already-applied upstream (since 2026-01-29 commit a95e567eb0e0) and fails to apply. Only matters for the mt76 bisect overlay — remove until bisect completes.
+package/kernel/mt76/patches/002-use-hrtimer_setup-in-mt76x02u-beacon-init.patch
+
+# MT76 BISECT (2026-06-03): same situation as 002 — the 003 ccflags-y/LED patch is already in upstream mt76 Makefile post-April-2. Remove until bisect completes.
+package/kernel/mt76/patches/003-pass-LED-define-via-ccflags-y.patch
