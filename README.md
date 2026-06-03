@@ -18,7 +18,7 @@ unzip zlib1g-dev file wget dos2unix`
 ### Clone Repo & Initial Build
 
 ```bash
-git clone https://github.com/Gilly1970/Gemtek-W1700K.git
+git clone https://github.com/Gilly1970/Gemtek-W1700K-6.18.git
 ```
 ```bash
 sudo chmod 775 -R Gemtek-W1700K
@@ -27,7 +27,7 @@ sudo chmod 775 -R Gemtek-W1700K
 
 ```bash
 # Make script executable
-cd Gemtek-W1700K
+cd Gemtek-W1700K-6.18
 sudo chmod +x Openwrt_Gemtek_w1700k.sh
 
 # Run script
