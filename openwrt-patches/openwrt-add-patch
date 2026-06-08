@@ -46,12 +46,16 @@ target/linux/generic/pending-6.18/700-netfilter-nft_flow_offload-handle-netdevic
 ### br_netfilter skb_cow_head guard
 target/linux/generic/pending-6.18/991-net-neigh-Reallocate-headroom-if-necessary-in-neigh_.patch
 
+### invalidate offloaded flows on bridge FDB roaming (fixes stuck flows after client roams between APs)
+target/linux/generic/pending-6.18/945-netfilter-nf_flow_table-invalidate-flows-on-bridge-FDB-roaming.patch
+
 ### airoha driver fixes ahead of upstream 6.18 (apply pre-existing patches that aren't yet in the kernel 6.18.x ships)
 target/linux/airoha/patches-6.18/628-net-airoha-Wait-for-TX-to-complete-in-airoha_dev_stop.patch
 target/linux/airoha/patches-6.18/941-net-airoha-ppe-Init-PPE-hw-at-tc-block-bind-for-bridge-mode.patch
 target/linux/airoha/patches-6.18/942-net-airoha-Fix-use-after-free-in-metadata-dst-teardown.patch
 target/linux/airoha/patches-6.18/943-net-airoha-Report-extack-error-on-htb-modify-failure.patch
 target/linux/airoha/patches-6.18/944-net-airoha-Fix-page_pool-double-release-on-LRO-error-path.patch
+target/linux/airoha/patches-6.18/946-net-airoha-Add-retry-mechanism-to-airoha_qdma_set_trtcm_param.patch
 
 ### enable bridge offload for AN7581 target
 target/linux/airoha/an7581/target.mk

@@ -7,36 +7,12 @@ In airoha_qdma_rx_process(), when an LRO aggregate fails parsing
 failure on the L2/L3/L4 headers), control jumps to free_frag: before
 skb_mark_for_recycle() has been called on q->skb.
 
-The free_frag: path then does:
-
-	dev_kfree_skb(q->skb);              /* frees head as if kmalloc'd */
-	page_pool_put_full_page(q->page_pool, page, true);
-
-q->skb was built around the same page via napi_build_skb() and that
-page is also referenced by the local `page` variable, so it is
-released twice:
-
-  1. dev_kfree_skb() -> skb_free_head() -> kfree(head) on a page_pool
-     page (pp_recycle bit not set, since skb_mark_for_recycle() was
-     deferred to the success path).
-  2. page_pool_put_full_page() then decrements pp_ref_count again.
-
-The second decrement underflows pp_ref_count, tripping
-WARN_ON(ret < 0) in page_pool_unref_netmem() (helpers.h:297) and
-leaves the page_pool / slab in a corrupted state. Observed on a
-W1700K (AN7581) acting as a router with LRO enabled on wan: two
-back-to-back warnings ~8.5 h into uptime, followed by silent RX
-death on an unrelated interface ~11 h later.
-
 Fix by marking the skb for recycle immediately after napi_build_skb()
 so that any subsequent error path within the first-buffer branch
 releases the page exactly once via dev_kfree_skb(). Replace the
 goto free_frag in the LRO error path with an explicit
 dev_kfree_skb()+continue so we do not also call page_pool_put_full_page()
 on the same page.
-
-Fixes: 916-net-airoha-Implement-LRO-TCP-support (out-of-tree)
-Signed-off-by: Gilly <gilroyscott1970@gmail.com>
 ---
  drivers/net/ethernet/airoha/airoha_eth.c | 9 ++++++---
  1 file changed, 6 insertions(+), 3 deletions(-)
