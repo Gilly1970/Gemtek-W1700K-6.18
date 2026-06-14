@@ -1,0 +1,11 @@
+--- a/drivers/thermal/airoha_thermal.c
++++ b/drivers/thermal/airoha_thermal.c
+@@ -503,7 +503,7 @@
+ 	 */
+ 	regmap_write(priv->map, EN7581_TEMPMONCTL2,
+ 		     FIELD_PREP(EN7581_FILT_INTERVAL, 1) |
+-		     FIELD_PREP(EN7581_FILT_INTERVAL, 379));
++		     FIELD_PREP(EN7581_SEN_INTERVAL, 379));
+ 
+ 	/* AHB poll is set to 146 * 68.64 = 10.02us */
+ 	regmap_write(priv->map, EN7581_TEMPAHBPOLL,

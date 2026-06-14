@@ -1,0 +1,17 @@
+--- a/drivers/thermal/airoha_thermal.c
++++ b/drivers/thermal/airoha_thermal.c
+@@ -373,12 +373,12 @@
+ 
+ 	if (low != -INT_MAX) {
+ 		/* Validate low and clamp it to a supported value */
+-		low = clamp_t(int, high, RAW_TO_TEMP(priv, 0),
++		low = clamp_t(int, low, RAW_TO_TEMP(priv, 0),
+ 			      RAW_TO_TEMP(priv, FIELD_MAX(EN7581_DOUT_TADC_MASK)));
+ 
+ 		/* We offset the low temp of 1°C to trigger correct event */
+ 		regmap_write(priv->map, EN7581_TEMPOFFSETL,
+-			     TEMP_TO_RAW(priv, high) >> 4);
++			     TEMP_TO_RAW(priv, low) >> 4);
+ 
+ 		enable_monitor = true;
+ 	}
