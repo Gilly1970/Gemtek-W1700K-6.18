@@ -1,0 +1,27 @@
+From: Felix Fietkau <nbd@nbd.name>
+Date: Tue, 26 Aug 2025 22:04:57 +0200
+Subject: [PATCH] nl80211: fix reporting spurious frame events
+
+When the nl80211 driver is shared across multiple interfaces (on the same
+wiphy), nl80211_spurious_frame can send the event to the wrong interface by
+using drv->ctx. Fix this by using bss->ctx instead.
+
+This is upstream OpenWrt commit 9c895bacfb ("hostapd: fix wds ap on
+single-wiphy devices"), which was dropped by the "hostapd: update to
+2026-02-27" version bump and not carried into the newer hostapd snapshot.
+Restored locally because the W1700K runs multiple BSSes on a single wiphy
+(phy0) and is affected: spurious-frame events are otherwise delivered to
+the first BSS, deauthing/kicking clients on the other SSIDs.
+
+Signed-off-by: Felix Fietkau <nbd@nbd.name>
+---
+
+--- a/src/drivers/driver_nl80211_event.c
++++ b/src/drivers/driver_nl80211_event.c
+@@ -2804,5 +2804,5 @@ static void nl80211_spurious_frame(struc
+ 	event.rx_from_unknown.link_id = tb[NL80211_ATTR_MLO_LINK_ID] ?
+ 		nla_get_u8(tb[NL80211_ATTR_MLO_LINK_ID]) : -1;
+ 
+-	wpa_supplicant_event(drv->ctx, EVENT_RX_FROM_UNKNOWN, &event);
++	wpa_supplicant_event(bss->ctx, EVENT_RX_FROM_UNKNOWN, &event);
+ }

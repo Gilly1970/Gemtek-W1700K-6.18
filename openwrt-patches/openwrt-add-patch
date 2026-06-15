@@ -14,6 +14,9 @@ package/firmware/wireless-regdb/patches/600-world-regd-6GHz.patch
 ### hostapd: fix ENFILE warning when reusing existing AP interface
 package/network/services/hostapd/patches/602-nl80211-short-circuit-use-existing-iface.patch
 
+### hostapd: restore spurious-frame fix (upstream 9c895bacfb, dropped by 2026-02-27 bump)
+package/network/services/hostapd/patches/060-nl80211-fix-reporting-spurious-frame-events.patch
+
 ### mt76 source bump to upstream HEAD 2ab649809db (2026-06-02) — try newer mt76 for 6 GHz EHT320 perf
 mt76-Makefile:package/kernel/mt76/Makefile
 
