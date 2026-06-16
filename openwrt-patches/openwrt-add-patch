@@ -45,7 +45,6 @@ package/network/config/wifi-scripts/files-ucode/usr/share/ucode/wifi/supplicant.
 package/network/config/wifi-scripts/files-ucode/usr/share/ucode/wifi/ap.uc
 
 ### Force-enable EHT beamforming in the ucode hostapd generator (MT7996).
-### Replaces the inert 010 quilt patch below, which targeted the shell path.
 package/network/config/wifi-scripts/files-ucode/usr/share/ucode/wifi/hostapd.uc
 package/network/services/hostapd/patches/602-allow-config-EHT-rate.patch
 
@@ -75,8 +74,6 @@ target/linux/airoha/patches-6.18/947-net-airoha-Fix-register-index-for-Tx-fwd-co
 target/linux/airoha/patches-6.18/948-net-airoha-Fix-always-true-condition-in-PPE1-queue-reservation-loop.patch
 target/linux/airoha/patches-6.18/949-net-airoha-Fix-error-handling-in-airoha_ppe_flush_sram_entries.patch
 target/linux/airoha/patches-6.18/950-net-airoha-Fix-debugfs-new-tuple-display-for-IPv4-ROUTE-entries.patch
-
-### upstream airoha fixes (added 2026-06-14): eth QoS queue underflow + airoha_thermal sensor-interval mask / low-trip clamp
 target/linux/airoha/patches-6.18/951-net-airoha-Fix-skb-priority-underflow-in-airoha_dev_select_queue.patch
 target/linux/airoha/patches-6.18/960-thermal-airoha-Fix-FIELD_PREP-using-wrong-mask-for-sensor-interval.patch
 target/linux/airoha/patches-6.18/961-thermal-airoha-Fix-low-trip-clamp-using-wrong-variable.patch
