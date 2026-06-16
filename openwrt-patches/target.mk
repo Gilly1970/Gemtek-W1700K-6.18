@@ -7,7 +7,7 @@ FEATURES+=pwm
 
 DEFAULT_PACKAGES += \
 	airoha-en7581-mt7996-npu-firmware uboot-envtools \
-	kmod-br-netfilter
+	kmod-br-netfilter kmod-crypto-hw-eip93
 
 define Target/Description
 	Build firmware images for Airoha an7581 ARM based boards.

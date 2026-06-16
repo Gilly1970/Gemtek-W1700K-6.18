@@ -1,0 +1,26 @@
+From c93bd88b1db471e1e61dab4682ab93c0833d25e2 Mon Sep 17 00:00:00 2001
+From: Gilly1970 <gilroyscott@hotmail.com>
+Date: Tue, 16 Jun 2026 16:46:39 +1000
+Subject: [PATCH] 310-11-add-RX-calibration-to-pcs-pon.patch
+
+---
+ drivers/net/pcs/airoha/pcs-airoha-common.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/net/pcs/airoha/pcs-airoha-common.c b/drivers/net/pcs/airoha/pcs-airoha-common.c
+index 2b528ce..1407fcc 100644
+--- a/drivers/net/pcs/airoha/pcs-airoha-common.c
++++ b/drivers/net/pcs/airoha/pcs-airoha-common.c
+@@ -1316,7 +1316,8 @@ static int airoha_pcs_probe(struct platform_device *pdev)
+ 	 * manual rx calibration is needed. Extend the manual-calibration
+ 	 * threshold to include E2 silicon.
+ 	 */
+-	if (device_is_compatible(dev, "airoha,an7581-pcs-eth")) {
++	if (device_is_compatible(dev, "airoha,an7581-pcs-eth") ||
++		device_is_compatible(dev, "airoha,an7581-pcs-pon")) {
+ 		u32 val;
+ 
+ 		ret = regmap_read(priv->scu, AIROHA_SCU_PDIDR, &val);
+-- 
+2.43.0
+
