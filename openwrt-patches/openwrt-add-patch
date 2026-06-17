@@ -88,6 +88,7 @@ package/network/services/hostapd/patches/015-mtk-hostapd-mtk-6G-band-does-not-re
 package/kernel/mac80211/patches/subsys/372-wifi-cfg80211-fix-definition-of-EHT-MCS-15-in-MRU.patch
 package/kernel/mac80211/patches/subsys/373-wifi-mac80211-fix-missing-ieee80211_eml_params-membe.patch
 package/kernel/mt76/patches/0005-wifi-mt76-mt7996-fix-capability-of-EHT-MCS-15-in-MRU.patch
+package/kernel/mt76/patches/004-set-per-radio-MAC-address-from-DT.patch
 
 ### Revert mt76 commit b0af99f "handle UNI PS sync events" — MT_DRV_HW_PS_BUFFERING + PS_SYNC
 015-Revert-wifi-mt76-mt7996-handle-UNI-PS-sync-events.patch:package/kernel/mt76/patches/015-Revert-wifi-mt76-mt7996-handle-UNI-PS-sync-events.patch
