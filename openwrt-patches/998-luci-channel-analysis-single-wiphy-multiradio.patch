@@ -1,0 +1,95 @@
+From: Gilly1970 <gilroyscott@hotmail.com>
+Date: Fri, 19 Jun 2026 00:00:00 +1000
+Subject: [PATCH] luci-mod-status: fix channel analysis on single-wiphy multi-radio
+
+iwinfo resolves the UCI radio name (radio0/radio1/...) to the wrong 
+sub-interface for the info and scan methods on this hardware (every 
+radio name resolves to the first/2.4GHz netdev), so the 5GHz tab showed 
+"No data": its scan results came back as 2.4GHz and were filtered
+out, and the local interface channel was not in the 5GHz graph. Address
+info/scan by the radio's actual netdev ifname (e.g. phy0.1-ap0) instead.
+freqlist resolves per-radio correctly and is left on the radio name.
+---
+ .../resources/view/status/channel_analysis.js | 35 ++++++++++
+ 1 file changed, 35 insertions(+)
+
+--- a/htdocs/luci-static/resources/view/status/channel_analysis.js
++++ b/htdocs/luci-static/resources/view/status/channel_analysis.js
+@@ -22,6 +22,13 @@
+ 		expect: { }
+ 	}),
+ 
++	callScan: rpc.declare({
++		object: 'iwinfo',
++		method: 'scan',
++		params: [ 'device' ],
++		expect: { results: [] }
++	}),
++
+ 	render_signal_badge(signalPercent, signalValue) {
+ 		let icon, title, value;
+ 
+@@ -201,8 +208,8 @@
+ 		let q;
+ 
+ 		return Promise.all([
+-			radio.dev.getScanList(),
+-			this.callInfo(radio.dev.getName())
++			this.callScan(radio.ifname),
++			this.callInfo(radio.ifname)
+ 		]).then(L.bind(function([results, local_wifi]) {
+ 			const table = radio.table;
+ 			const chan_analysis = radio.graph;
+@@ -413,12 +420,28 @@
+ 				const tasks = [], ret = [];
+ 
+ 				for (let d of data) {
+-					ret[d.getName()] = { dev : d };
++					ret[d.getName()] = { dev : d, ifname : d.getName() };
+ 
+ 					tasks.push(this.callFrequencyList(d.getName())
+ 					.then(L.bind(function(radio, data) {
+ 						ret[radio.getName()].freq = data;
+ 					}, this, d)));
++
++					/* On single-wiphy multi-radio hardware (e.g. MT7996) iwinfo
++					   resolves the UCI radio name (radio0/1/2) to the wrong
++					   sub-interface for the info/scan methods, so address those
++					   by the radio's actual netdev ifname (e.g. phy0.1-ap0)
++					   instead. freqlist resolves per-radio correctly and is
++					   left on the radio name. */
++					tasks.push(d.getWifiNetworks().then(L.bind(function(radio, nets) {
++						for (let n of nets) {
++							const ifname = n.getIfname();
++							if (ifname) {
++								ret[radio.getName()].ifname = ifname;
++								break;
++							}
++						}
++					}, this, d)));
+ 				}
+ 
+ 				return Promise.all(tasks).then(function() { return ret; })
+@@ -455,6 +478,14 @@
+ 				if (bands[band].channels.length == 0)
+ 					continue;
+ 
++				/* Single-wiphy multi-radio (e.g. MT7996): iwinfo's freqlist
++				   returns the whole wiphy's channels for every radio, so each
++				   radio would otherwise spawn a tab for all three bands. Build
++				   only this radio's own band. */
++				const devBand = wifiDevs[ifname].dev.get('band');
++				if (devBand && (band + 'g') != devBand)
++					continue;
++
+ 				const csvg = svg.cloneNode(true);
+ 				const table = E('table', { 'class': 'table' }, [
+ 					E('tr', { 'class': 'tr table-titles' }, [
+@@ -477,6 +508,7 @@
+ 
+ 				this.radios[ifname+band] = {
+ 					dev: wifiDevs[ifname].dev,
++					ifname: wifiDevs[ifname].ifname,
+ 					band: band,
+ 					graph: graph_data,
+ 					table: table,

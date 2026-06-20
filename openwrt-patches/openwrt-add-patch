@@ -1,8 +1,9 @@
 package/firmware/wireless-regdb/patches/555-US-fix.patch
 package/firmware/wireless-regdb/patches/700-Ozzie-320_Mhz-fix.patch
 
-### Change from 0% to 0.0% in luci status overview bars
+### Fix Channel Analysis / Change from 0% to 0.0% in luci status overview bars
 feeds/luci/modules/luci-mod-status/patches/999-memory-storage-bar-adjust.patch
+feeds/luci/modules/luci-mod-status/patches/998-luci-channel-analysis-single-wiphy-multiradio.patch
 
 ### Bake NPU firmware into kernel image so airoha-npu probes succeed before rootfs mount (silences en7581_MT7996_npu_rv32.bin -2 / -ENOENT early-boot retry)
 firmware/airoha/en7581_MT7996_npu_rv32.bin:target/linux/airoha/files/firmware/airoha/en7581_MT7996_npu_rv32.bin
