@@ -1,0 +1,29 @@
+From: Gilly <gilroyscott1970@gmail.com>
+Date: Sat, 20 Jun 2026 00:00:00 +0000
+Subject: [PATCH] net: airoha: fix off-by-one in airoha_tc_remove_htb_queue
+
+Backport of Lorenzo Bianconi's net patch (v2 1/2) "net: airoha: Fix
+off-by-one in airoha_tc_remove_htb_queue".
+
+airoha_tc_htb_alloc_leaf_queue() programs the per-channel TX rate limit
+with the channel index, but the removal path called
+airoha_qdma_set_tx_rate_limit() with queue + 1. Tearing down an HTB leaf
+therefore cleared the rate limit on the wrong channel and left the
+intended channel's limit stale. Pass queue, matching the allocation.
+
+Only exercised when tc HTB hardware-offload (e.g. offloaded SQM) is in
+use; harmless otherwise.
+---
+diff --git a/drivers/net/ethernet/airoha/airoha_eth.c b/drivers/net/ethernet/airoha/airoha_eth.c
+index 64dde6464f3f..aa98d1823ab6 100644
+--- a/drivers/net/ethernet/airoha/airoha_eth.c
++++ b/drivers/net/ethernet/airoha/airoha_eth.c
+@@ -3006,7 +3006,7 @@ static void airoha_tc_remove_htb_queue(struct net_device *netdev, int queue)
+ 	struct airoha_qdma *qdma = dev->qdma;
+ 
+ 	netif_set_real_num_tx_queues(netdev, netdev->real_num_tx_queues - 1);
+-	airoha_qdma_set_tx_rate_limit(netdev, queue + 1, 0, 0);
++	airoha_qdma_set_tx_rate_limit(netdev, queue, 0, 0);
+ 
+ 	clear_bit(queue, qdma->qos_channel_map);
+ 	clear_bit(queue, dev->qos_sq_bmap);

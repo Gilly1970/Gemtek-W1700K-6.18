@@ -1,0 +1,52 @@
+From: Gilly <gilroyscott1970@gmail.com>
+Date: Sat, 20 Jun 2026 00:00:00 +0000
+Subject: [PATCH] net: airoha: fix BQL underflow and UAF in shared QDMA TX ring
+
+Minimal form of Lorenzo Bianconi's BQL-underflow/UAF fix, re-scoped
+2026-06-20 for master @ 2026-06-19. Upstream meanwhile refactored DMA
+enable/disable into airoha_qdma_start()/airoha_qdma_stop() and already
+added the TX/RX DMA drain busy-poll in airoha_qdma_stop() (the part that
+local patch 628 used to add, and that the earlier v2 restructure folded
+into airoha_qdma_cleanup()). So the full v2 lifecycle restructure
+(DMA-at-probe / DEV_STATE_FLUSH / tx_flush) is no longer the right fit and
+would fight upstream's refactor.
+
+Two real bugs remain in the new base, fixed here directly:
+
+1) UAF: airoha_qdma_tx_napi_poll() read e->skb but never cleared it, so the
+   per-stop teardown (airoha_qdma_stop -> airoha_qdma_cleanup_tx_queue)
+   could act on a stale skb pointer. Clear e->skb when consumed.
+
+2) BQL underflow: airoha_qdma_cleanup_tx_queue() freed in-flight skbs
+   without netdev_tx_completed_queue(), underflowing BQL and wedging TX
+   after a stop that had packets in flight on the shared ring. Balance BQL
+   before freeing.
+
+This supersedes local patch 628 (drain-poll now upstream in
+airoha_qdma_stop) — 628 stays retired.
+---
+--- a/drivers/net/ethernet/airoha/airoha_eth.c
++++ b/drivers/net/ethernet/airoha/airoha_eth.c
+@@ -1239,6 +1239,7 @@
+ 
+ 		e = &q->entry[index];
+ 		skb = e->skb;
++		e->skb = NULL;
+ 
+ 		dma_unmap_single(eth->dev, e->dma_addr, e->dma_len,
+ 				 DMA_TO_DEVICE);
+@@ -1399,7 +1400,13 @@
+ 
+ 		dma_unmap_single(eth->dev, e->dma_addr, e->dma_len,
+ 				 DMA_TO_DEVICE);
+-		dev_kfree_skb_any(e->skb);
++		if (e->skb) {
++			struct netdev_queue *txq;
++
++			txq = skb_get_tx_queue(e->skb->dev, e->skb);
++			netdev_tx_completed_queue(txq, 1, e->skb->len);
++			dev_kfree_skb_any(e->skb);
++		}
+ 		e->dma_addr = 0;
+ 		e->skb = NULL;
+ 		list_add_tail(&e->list, &q->tx_list);

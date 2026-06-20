@@ -1,7 +1,13 @@
 From c93bd88b1db471e1e61dab4682ab93c0833d25e2 Mon Sep 17 00:00:00 2001
 From: Gilly1970 <gilroyscott@hotmail.com>
 Date: Tue, 16 Jun 2026 16:46:39 +1000
-Subject: [PATCH] 310-11-add-RX-calibration-to-pcs-pon.patch
+Subject: [PATCH] net: pcs: airoha: add RX calibration to pcs-pon (WAN)
+
+Extend the manual RX calibration (added for the Ethernet PCS / lan2 in
+745-net-pcs-airoha-extend-manual-rx-calib-to-E2-silicon) to the PON PCS,
+which on the Gemtek W1700K drives the WAN port (gdm2 -> pon_pcs -> phy8).
+Reported on the forum to fix intermittent WAN issues on HW.2.0 units.
+Gated by the same PRODUCT_ID < 0x3 (E1/E2 silicon) check in 745.
 
 ---
  drivers/net/pcs/airoha/pcs-airoha-common.c | 3 ++-

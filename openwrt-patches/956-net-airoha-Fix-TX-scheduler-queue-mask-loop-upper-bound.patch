@@ -1,0 +1,24 @@
+From: Gilly <gilroyscott1970@gmail.com>
+Date: Sat, 20 Jun 2026 00:00:00 +0000
+Subject: [PATCH] net: airoha: fix TX scheduler queue mask loop upper bound
+
+Backport of Wayen Yan's net patch (v3), rebased 2026-06-20 onto master's
+airoha_qdma_deref() refactor (set_chan_tx_sched now derefs qdma into a
+local instead of using dev->qdma).
+
+airoha_qdma_set_chan_tx_sched() looped over AIROHA_NUM_TX_RING (32) while
+clearing TXQ_DISABLE_CHAN_QUEUE_MASK(channel, i) = BIT(i + (channel&3)*8),
+shifting past bit 31 of a 32-bit register. There are only
+AIROHA_NUM_QOS_QUEUES (8) queues per channel; bound the loop there.
+---
+--- a/drivers/net/ethernet/airoha/airoha_eth.c
++++ b/drivers/net/ethernet/airoha/airoha_eth.c
+@@ -2801,7 +2801,7 @@
+ 	int i;
+ 
+ 	qdma = airoha_qdma_deref(dev);
+-	for (i = 0; i < AIROHA_NUM_TX_RING; i++)
++	for (i = 0; i < AIROHA_NUM_QOS_QUEUES; i++)
+ 		airoha_qdma_clear(qdma, REG_QUEUE_CLOSE_CFG(channel),
+ 				  TXQ_DISABLE_CHAN_QUEUE_MASK(channel, i));
+ 

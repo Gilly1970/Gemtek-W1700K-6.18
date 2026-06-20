@@ -1,6 +1,21 @@
+From: Gilly <gilroyscott1970@gmail.com>
+Date: Sat, 20 Jun 2026 00:00:00 +0000
+Subject: [PATCH] thermal: airoha: fix low-trip clamp using wrong variable
+
+In airoha_thermal_set_trips(), the low-trip branch clamps 'high' into
+'low': low = clamp_t(int, high, ...). It must clamp 'low', otherwise the
+low trip threshold is derived from the high temperature.
+
+Scope note (2026-06-20): this used to also fix the TEMPOFFSETL regmap_write
+(TEMP_TO_RAW(priv, high) -> low), but the base 402-01-...regmap-API.patch
+already writes 'low' there (and upstream commit 71d0568 fixes the same line
+for trees that still had 'high'). Bundling both in one hunk caused GNU patch
+to treat the whole hunk as already-applied and silently skip the clamp fix.
+Reduced to the clamp line only so it actually lands.
+---
 --- a/drivers/thermal/airoha_thermal.c
 +++ b/drivers/thermal/airoha_thermal.c
-@@ -373,12 +373,12 @@
+@@ -373,7 +373,7 @@
  
  	if (low != -INT_MAX) {
  		/* Validate low and clamp it to a supported value */
@@ -9,9 +24,3 @@
  			      RAW_TO_TEMP(priv, FIELD_MAX(EN7581_DOUT_TADC_MASK)));
  
  		/* We offset the low temp of 1°C to trigger correct event */
- 		regmap_write(priv->map, EN7581_TEMPOFFSETL,
--			     TEMP_TO_RAW(priv, high) >> 4);
-+			     TEMP_TO_RAW(priv, low) >> 4);
- 
- 		enable_monitor = true;
- 	}

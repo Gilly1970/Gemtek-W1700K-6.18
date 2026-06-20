@@ -1,0 +1,67 @@
+From: Gilly <gilroyscott1970@gmail.com>
+Date: Sat, 20 Jun 2026 00:00:00 +0000
+Subject: [PATCH] net: airoha: fix real_num_tx_queues for sparse QoS channels
+
+Backport of Lorenzo Bianconi's net patch (v2 2/2), rebased 2026-06-20 onto
+master's airoha_qdma_deref() refactor of the HTB offload path. Depends on
+954 (the queue/queue+1 off-by-one fix in airoha_tc_remove_htb_queue).
+
+Size real_num_tx_queues from the channel index on alloc (only growing it
+when needed), and on removal recompute it from the highest still-set bit in
+qos_sq_bmap, so non-contiguous HTB channels don't desync the queue count.
+---
+--- a/drivers/net/ethernet/airoha/airoha_eth.c
++++ b/drivers/net/ethernet/airoha/airoha_eth.c
+@@ -3199,7 +3199,7 @@
+ 					  struct tc_htb_qopt_offload *opt)
+ {
+ 	u32 channel = TC_H_MIN(opt->classid) % AIROHA_NUM_QOS_CHANNELS;
+-	int err, num_tx_queues = netdev->real_num_tx_queues;
++	int err, num_tx_queues = AIROHA_NUM_TX_RING + channel + 1;
+ 	struct airoha_gdm_dev *dev = netdev_priv(netdev);
+ 	struct airoha_qdma *qdma;
+ 
+@@ -3217,13 +3217,15 @@
+ 	if (err)
+ 		goto error;
+ 
+-	err = netif_set_real_num_tx_queues(netdev, num_tx_queues + 1);
+-	if (err) {
+-		airoha_qdma_set_tx_rate_limit(netdev, channel, 0,
+-					      opt->quantum);
+-		NL_SET_ERR_MSG_MOD(opt->extack,
+-				   "failed setting real_num_tx_queues");
+-		goto error;
++	if (num_tx_queues > netdev->real_num_tx_queues) {
++		err = netif_set_real_num_tx_queues(netdev, num_tx_queues);
++		if (err) {
++			airoha_qdma_set_tx_rate_limit(netdev, channel, 0,
++						      opt->quantum);
++			NL_SET_ERR_MSG_MOD(opt->extack,
++					   "failed setting real_num_tx_queues");
++			goto error;
++		}
+ 	}
+ 
+ 	set_bit(channel, dev->qos_sq_bmap);
+@@ -3422,14 +3424,19 @@
+ static void airoha_tc_remove_htb_queue(struct net_device *netdev, int queue)
+ {
+ 	struct airoha_gdm_dev *dev = netdev_priv(netdev);
++	int num_tx_queues = AIROHA_NUM_TX_RING;
+ 	struct airoha_qdma *qdma;
+ 
+-	netif_set_real_num_tx_queues(netdev, netdev->real_num_tx_queues - 1);
+ 	airoha_qdma_set_tx_rate_limit(netdev, queue, 0, 0);
+ 
+ 	qdma = airoha_qdma_deref(dev);
+ 	clear_bit(queue, qdma->qos_channel_map);
+ 	clear_bit(queue, dev->qos_sq_bmap);
++
++	if (!bitmap_empty(dev->qos_sq_bmap, AIROHA_NUM_QOS_CHANNELS))
++		num_tx_queues += find_last_bit(dev->qos_sq_bmap,
++					       AIROHA_NUM_QOS_CHANNELS) + 1;
++	netif_set_real_num_tx_queues(netdev, num_tx_queues);
+ }
+ 
+ static int airoha_tc_htb_delete_leaf_queue(struct net_device *netdev,
