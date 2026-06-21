@@ -1,5 +1,5 @@
 From: Gilly1970 <gilroyscott@hotmail.com>
-Date: Fri, 19 Jun 2026 00:00:00 +1000
+Date: Sun, 21 Jun 2026 20:48:19 +1000
 Subject: [PATCH] luci-mod-status: fix channel analysis on single-wiphy multi-radio
 
 iwinfo resolves the UCI radio name (radio0/radio1/...) to the wrong 
@@ -10,12 +10,9 @@ out, and the local interface channel was not in the 5GHz graph. Address
 info/scan by the radio's actual netdev ifname (e.g. phy0.1-ap0) instead.
 freqlist resolves per-radio correctly and is left on the radio name.
 ---
- .../resources/view/status/channel_analysis.js | 35 ++++++++++
- 1 file changed, 35 insertions(+)
-
 --- a/htdocs/luci-static/resources/view/status/channel_analysis.js
 +++ b/htdocs/luci-static/resources/view/status/channel_analysis.js
-@@ -22,6 +22,13 @@
+@@ -22,6 +22,13 @@ return view.extend({
  		expect: { }
  	}),
  
@@ -29,7 +26,70 @@ freqlist resolves per-radio correctly and is left on the radio name.
  	render_signal_badge(signalPercent, signalValue) {
  		let icon, title, value;
  
-@@ -201,8 +208,8 @@
+@@ -57,6 +64,18 @@ return view.extend({
+ 		const step = chan_analysis.col_width;
+ 		const height_diff = (height-(height-(res.signal*-4)));
+ 
++		/* Draw each AP as a smooth spectral hump. */
++		function mask_points(centre, half_w, base_y, peak_y) {
++			const segs = 28, amp = base_y - peak_y, out = [];
++			for (let i = 0; i <= segs; i++) {
++				const t = i / segs;
++				const x = centre - half_w + t * 2 * half_w;
++				const y = base_y - amp * 0.5 * (1 - Math.cos(2 * Math.PI * t));
++				out.push(x.toFixed(2) + ',' + y.toFixed(2));
++			}
++			return out.join(' ');
++		}
++
+ 		if (scanCache[res.bssid].color == null)
+ 			scanCache[res.bssid].color = random.derive_color(res.bssid);
+ 
+@@ -77,6 +96,11 @@ return view.extend({
+ 			scanCache[res.bssid].graph = { group : group, line : line, text : text };
+ 		}
+ 
++		/* Stagger SSID labels. */
++		const lr = chan_analysis.label_rows || (chan_analysis.label_rows = {});
++		const label_row = lr[res.channel] || 0;
++		lr[res.channel] = label_row + 1;
++
+ 		channels.forEach(function(channel) {
+ 			if (channel_width > 2) {
+ 				if (!("main" in scanCache[res.bssid].graph)) {
+@@ -87,26 +111,16 @@ return view.extend({
+ 					scanCache[res.bssid].graph["main"] = main;
+ 				}
+ 				const main_offset = offset_tbl[res.channel];
+-				const points = [
+-					(main_offset-(step*(2  )))+','+height,
+-					(main_offset-(step*(2-1)))+','+height_diff,
+-					(main_offset+(step*(2-1)))+','+height_diff,
+-					(main_offset+(step*(2  )))+','+height
+-				];
+-				scanCache[res.bssid].graph.main.setAttribute('points', points);
++				scanCache[res.bssid].graph.main.setAttribute('points',
++					mask_points(main_offset, step*2, height, height_diff));
+ 			}
+ 
+ 			const chan_offset = offset_tbl[channel];
+-			const points = [
+-				(chan_offset-(step*(channel_width  )))+','+height,
+-				(chan_offset-(step*(channel_width-1)))+','+height_diff,
+-				(chan_offset+(step*(channel_width-1)))+','+height_diff,
+-				(chan_offset+(step*(channel_width  )))+','+height
+-			];
+ 
+ 			scanCache[res.bssid].graph.text.setAttribute('x', offset_tbl[res.channel]-step);
+-			scanCache[res.bssid].graph.text.setAttribute('y', height_diff - 2);
+-			scanCache[res.bssid].graph.line.setAttribute('points', points);
++			scanCache[res.bssid].graph.text.setAttribute('y', height_diff - 2 + label_row * 12);
++			scanCache[res.bssid].graph.line.setAttribute('points',
++				mask_points(chan_offset, step*channel_width, height, height_diff));
+ 			scanCache[res.bssid].graph.group.style.zIndex = res.signal*-1;
+ 			scanCache[res.bssid].graph.group.style.opacity = res.stale ? '0.5' : null;
+ 		})
+@@ -201,11 +215,12 @@ return view.extend({
  		let q;
  
  		return Promise.all([
@@ -40,7 +100,11 @@ freqlist resolves per-radio correctly and is left on the radio name.
  		]).then(L.bind(function([results, local_wifi]) {
  			const table = radio.table;
  			const chan_analysis = radio.graph;
-@@ -413,12 +420,28 @@
++			chan_analysis.label_rows = {};
+ 			const scanCache = radio.scanCache;
+ 			const band = radio.band;
+ 
+@@ -413,12 +428,28 @@ return view.extend({
  				const tasks = [], ret = [];
  
  				for (let d of data) {
@@ -70,7 +134,7 @@ freqlist resolves per-radio correctly and is left on the radio name.
  				}
  
  				return Promise.all(tasks).then(function() { return ret; })
-@@ -455,6 +478,14 @@
+@@ -455,6 +486,14 @@ return view.extend({
  				if (bands[band].channels.length == 0)
  					continue;
  
@@ -85,7 +149,7 @@ freqlist resolves per-radio correctly and is left on the radio name.
  				const csvg = svg.cloneNode(true);
  				const table = E('table', { 'class': 'table' }, [
  					E('tr', { 'class': 'tr table-titles' }, [
-@@ -477,6 +508,7 @@
+@@ -477,6 +516,7 @@ return view.extend({
  
  				this.radios[ifname+band] = {
  					dev: wifiDevs[ifname].dev,
@@ -93,3 +157,6 @@ freqlist resolves per-radio correctly and is left on the radio name.
  					band: band,
  					graph: graph_data,
  					table: table,
+-- 
+2.43.0
+
