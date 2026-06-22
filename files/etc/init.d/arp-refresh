@@ -1,15 +1,33 @@
 #!/bin/sh /etc/rc.common
+# Event-driven ARP/neighbour refresh. Pings a LAN client the moment the
+# kernel marks its neighbour entry new or STALE, so LuCI's client list stays
+# populated without a fixed poll interval.
 START=99
 USE_PROCD=1
 
 start_service() {
     procd_open_instance
     procd_set_param command /bin/sh -c '
-        while true; do
-            # Full scan to catch new devices and refresh hostnames in LuCI
-            arp-scan -qxlN -I br-lan | awk "{print \$1}" | \
-                xargs -r fping -q -c1
-            sleep 300
+        # Safety-net discovery sweep every 15 min (catches dead-silent hosts).
+        ( while true; do
+            arp-scan -qxlN -I br-lan 2>/dev/null | awk "{print \$1}" |
+                xargs -r fping -q -c1 >/dev/null 2>&1
+            sleep 900
+          done ) &
+
+        # Instant refresh on neighbour-table changes for br-lan clients.
+        ip monitor neigh 2>/dev/null | while read -r line; do
+            case "$line" in *"dev br-lan"*) ;; *) continue ;; esac
+            # Only act on new/expiring entries. Do NOT ping REACHABLE ones,
+            # or our own ping would re-trigger us in a loop.
+            case "$line" in
+                *STALE*|*FAILED*|*INCOMPLETE*|*PROBE*) ;;
+                *) continue ;;
+            esac
+            ip=${line%% *}
+            case "$ip" in
+                [0-9]*.[0-9]*.[0-9]*.[0-9]*) fping -q -c1 "$ip" >/dev/null 2>&1 ;;
+            esac
         done
     '
     procd_set_param respawn

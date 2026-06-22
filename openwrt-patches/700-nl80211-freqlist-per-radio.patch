@@ -1,0 +1,198 @@
+From: Gilly1970 <gilroyscott@hotmail.com>
+Date: Sat, 20 Jun 2026 00:00:00 +1000
+Subject: [PATCH] nl80211: scope freqlist to the requested radio on
+ single-wiphy multi-radio
+
+On single-wiphy multi-radio hardware (e.g. MT7996 / Airoha W1700K) every
+"radioN" UCI wifi-device shares one PCI path and therefore resolves to the
+same wiphy, so iwinfo's freqlist returned the whole wiphy's channels (all
+bands) for every radio. That breaks consumers such as LuCI's Channel
+Analysis page, which builds one band graph per (device x band).
+
+Resolve the radio index for the requested device -- from the 'radio' UCI
+option for a "radioN" section, or from NL80211_ATTR_VIF_RADIO_MASK for a
+real netdev -- read that radio's frequency ranges from
+NL80211_ATTR_WIPHY_RADIOS, and drop frequencies that fall outside them.
+If the radio index or radio ranges cannot be determined (older kernels,
+single-radio hardware) behaviour is unchanged.
+---
+ iwinfo_nl80211.c | 128 +++++++++++++++++++++++++++++++++++++++++++++--
+ 1 file changed, 122 insertions(+), 6 deletions(-)
+
+--- a/iwinfo_nl80211.c
++++ b/iwinfo_nl80211.c
+@@ -3217,11 +3217,123 @@
+ 	return -1;
+ }
+ 
++struct nl80211_freqlist_ctx {
++	struct nl80211_array_buf arr;
++	int radio_idx;
++	int n_ranges;
++	struct { uint32_t start, end; } ranges[16];	/* kHz */
++};
++
++/* Determine the radio index a device belongs to. For a "radioN" UCI
++ * wifi-device section -- which on single-wiphy multi-radio hardware resolves
++ * to the whole wiphy -- this is the 'radio' option; for a real netdev it is
++ * derived from the per-interface radio mask. Returns -1 if unknown. */
++static int nl80211_radio_idx(const char *ifname)
++{
++	struct nl80211_if_data data = {};
++	struct uci_section *s;
++	const char *opt;
++	int idx = -1;
++
++	s = iwinfo_uci_get_radio(ifname, "mac80211");
++	if (s) {
++		opt = uci_lookup_option_string(uci_ctx, s, "radio");
++		if (opt)
++			idx = atoi(opt);
++		iwinfo_uci_free();
++		if (idx >= 0)
++			return idx;
++	}
++
++	if (nl80211_get_if_data(ifname, &data) == 0)
++		return data.radio_idx;
++
++	return -1;
++}
++
++static bool nl80211_freq_in_radio(struct nl80211_freqlist_ctx *ctx, uint32_t mhz)
++{
++	uint32_t khz = mhz * 1000;
++	int i;
++
++	for (i = 0; i < ctx->n_ranges; i++)
++		if (khz >= ctx->ranges[i].start && khz <= ctx->ranges[i].end)
++			return true;
++
++	return false;
++}
++
++static int nl80211_radio_ranges_cb(struct nl_msg *msg, void *arg)
++{
++	struct nl80211_freqlist_ctx *ctx = arg;
++	struct nlattr **attr = nl80211_parse(msg);
++	struct nlattr *radio, *range;
++	int radios_remain, ranges_remain;
++
++	if (!attr[NL80211_ATTR_WIPHY_RADIOS])
++		return NL_SKIP;
++
++	nla_for_each_nested(radio, attr[NL80211_ATTR_WIPHY_RADIOS], radios_remain)
++	{
++		struct nlattr *rtb[NL80211_WIPHY_RADIO_ATTR_MAX + 1];
++
++		nla_parse(rtb, NL80211_WIPHY_RADIO_ATTR_MAX,
++			  nla_data(radio), nla_len(radio), NULL);
++
++		if (!rtb[NL80211_WIPHY_RADIO_ATTR_INDEX] ||
++		    (int)nla_get_u32(rtb[NL80211_WIPHY_RADIO_ATTR_INDEX]) != ctx->radio_idx)
++			continue;
++
++		nla_for_each_nested(range, radio, ranges_remain)
++		{
++			struct nlattr *ftb[NL80211_WIPHY_RADIO_FREQ_ATTR_MAX + 1];
++
++			if (nla_type(range) != NL80211_WIPHY_RADIO_ATTR_FREQ_RANGE)
++				continue;
++
++			nla_parse(ftb, NL80211_WIPHY_RADIO_FREQ_ATTR_MAX,
++				  nla_data(range), nla_len(range), NULL);
++
++			if (!ftb[NL80211_WIPHY_RADIO_FREQ_ATTR_START] ||
++			    !ftb[NL80211_WIPHY_RADIO_FREQ_ATTR_END])
++				continue;
++
++			if (ctx->n_ranges < (int)ARRAY_SIZE(ctx->ranges)) {
++				ctx->ranges[ctx->n_ranges].start =
++					nla_get_u32(ftb[NL80211_WIPHY_RADIO_FREQ_ATTR_START]);
++				ctx->ranges[ctx->n_ranges].end =
++					nla_get_u32(ftb[NL80211_WIPHY_RADIO_FREQ_ATTR_END]);
++				ctx->n_ranges++;
++			}
++		}
++	}
++
++	return NL_SKIP;
++}
++
++static void nl80211_fill_radio_ranges(const char *ifname, int flags,
++                                      struct nl80211_freqlist_ctx *ctx)
++{
++	struct nl80211_msg_conveyor *cv;
++
++	cv = nl80211_msg(ifname, NL80211_CMD_GET_WIPHY, flags);
++	if (!cv)
++		return;
++
++	NLA_PUT_FLAG(cv->msg, NL80211_ATTR_SPLIT_WIPHY_DUMP);
++	nl80211_send(cv, nl80211_radio_ranges_cb, ctx);
++	return;
++
++nla_put_failure:
++	nl80211_free(cv);
++}
++
+ static int nl80211_get_freqlist_cb(struct nl_msg *msg, void *arg)
+ {
+ 	int bands_remain, freqs_remain;
+ 
+-	struct nl80211_array_buf *arr = arg;
++	struct nl80211_freqlist_ctx *ctx = arg;
++	struct nl80211_array_buf *arr = &ctx->arr;
+ 	struct iwinfo_freqlist_entry *e;
+ 
+ 	struct nlattr **attr = nl80211_parse(msg);
+@@ -3248,6 +3360,14 @@
+ 					    freqs[NL80211_FREQUENCY_ATTR_DISABLED])
+ 						continue;
+ 
++					/* Skip frequencies that do not belong to
++					 * the requested radio (single-wiphy
++					 * multi-radio hardware). */
++					if (ctx->n_ranges > 0 &&
++					    !nl80211_freq_in_radio(ctx,
++					        nla_get_u32(freqs[NL80211_FREQUENCY_ATTR_FREQ])))
++						continue;
++
+ 					e->band = nl80211_get_band(band->nla_type);
+ 					e->mhz = nla_get_u32(freqs[NL80211_FREQUENCY_ATTR_FREQ]);
+ 					e->channel = nl80211_freq2channel(e->mhz);
+@@ -3288,20 +3408,31 @@
+ static int nl80211_get_freqlist(const char *ifname, char *buf, int *len)
+ {
+ 	struct nl80211_msg_conveyor *cv;
+-	struct nl80211_array_buf arr = { .buf = buf, .count = 0 };
++	struct nl80211_freqlist_ctx ctx = {
++		.arr = { .buf = buf, .count = 0 },
++		.n_ranges = 0,
++	};
+ 	uint32_t features = nl80211_get_protocol_features(ifname);
+ 	int flags;
+ 
+ 	flags = features & NL80211_PROTOCOL_FEATURE_SPLIT_WIPHY_DUMP ? NLM_F_DUMP : 0;
++
++	/* On single-wiphy multi-radio hardware the wiphy advertises the
++	 * frequencies of every radio. If the requested device maps to a
++	 * specific radio, restrict the list to that radio's frequencies. */
++	ctx.radio_idx = nl80211_radio_idx(ifname);
++	if (ctx.radio_idx >= 0)
++		nl80211_fill_radio_ranges(ifname, flags, &ctx);
++
+ 	cv = nl80211_msg(ifname, NL80211_CMD_GET_WIPHY, flags);
+ 	if (!cv)
+ 		goto out;
+ 
+ 	NLA_PUT_FLAG(cv->msg, NL80211_ATTR_SPLIT_WIPHY_DUMP);
+-	if (nl80211_send(cv, nl80211_get_freqlist_cb, &arr))
++	if (nl80211_send(cv, nl80211_get_freqlist_cb, &ctx))
+ 		goto out;
+ 
+-	*len = arr.count * sizeof(struct iwinfo_freqlist_entry);
++	*len = ctx.arr.count * sizeof(struct iwinfo_freqlist_entry);
+ 	return 0;
+ 
+ nla_put_failure:

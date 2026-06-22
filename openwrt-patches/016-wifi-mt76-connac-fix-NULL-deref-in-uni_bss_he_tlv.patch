@@ -1,0 +1,19 @@
+From: Gilly <gilroyscott1970@gmail.com>
+Subject: [PATCH] wifi: mt76: connac: fix possible NULL deref in mt76_connac_mcu_uni_bss_he_tlv
+
+Backport of Lorenzo Bianconi's linux-wireless series (1/4).
+mt76_connac_get_he_phy_cap() can return NULL when the band carries no HE
+capability; mt76_connac_mcu_uni_bss_he_tlv() dereferences the result via
+cap->he_mcs_nss_supp without checking. Bail out early on NULL.
+
+--- a/mt76_connac_mcu.c
++++ b/mt76_connac_mcu.c
+@@ -1441,6 +1441,8 @@
+ 	struct bss_info_uni_he *he;
+ 
+ 	cap = mt76_connac_get_he_phy_cap(phy, vif);
++	if (!cap)
++		return;
+ 
+ 	he = (struct bss_info_uni_he *)tlv;
+ 	he->he_pe_duration = vif->bss_conf.htc_trig_based_pkt_ext;
