@@ -1,21 +1,20 @@
 From: Lorenzo Bianconi <lorenzo@kernel.org>
-Subject: [PATCH net-next] net: airoha: Add retry mechanism to airoha_qdma_set_trtcm_param
+Subject: [PATCH net-next v2] net: airoha: Add retry mechanism to airoha_qdma_set_trtcm_param
 
 Replace the single write + RW_DONE poll in airoha_qdma_set_trtcm_param()
 with a write-and-verify retry loop. The hardware can silently fail to
 commit a TRTCM parameter write (RW_DONE asserts but the stored value
-differs from what was written), so verify the readback matches and
-retry up to 100 times before returning -EBUSY.
+differs from what was written), so wait for RW_DONE, verify the readback
+matches, and retry up to 100 times before returning an error.
 
 Signed-off-by: Lorenzo Bianconi <lorenzo@kernel.org>
 ---
- drivers/net/ethernet/airoha/airoha_eth.c | 19 ++++++++++++++-----
- 1 file changed, 14 insertions(+), 5 deletions(-)
+ drivers/net/ethernet/airoha/airoha_eth.c | 30 +++++++++++++++++++------
+ 1 file changed, 23 insertions(+), 7 deletions(-)
 
-diff --git a/drivers/net/ethernet/airoha/airoha_eth.c b/drivers/net/ethernet/airoha/airoha_eth.c
 --- a/drivers/net/ethernet/airoha/airoha_eth.c
 +++ b/drivers/net/ethernet/airoha/airoha_eth.c
-@@ -2493,14 +2493,23 @@ static int airoha_qdma_set_trtcm_param(struct airoha_qdma *qdma, int channel,
+@@ -3089,14 +3089,30 @@
  		     FIELD_PREP(TRTCM_METER_GROUP_MASK, group) |
  		     FIELD_PREP(TRTCM_PARAM_INDEX_MASK, idx) |
  		     FIELD_PREP(TRTCM_PARAM_RATE_TYPE_MASK, mode);
@@ -33,15 +32,22 @@ diff --git a/drivers/net/ethernet/airoha/airoha_eth.c b/drivers/net/ethernet/air
 +		airoha_qdma_wr(qdma, REG_TRTCM_DATA_LOW(addr), val);
 +		wmb();
 +		airoha_qdma_wr(qdma, REG_TRTCM_CFG_PARAM(addr), config);
++
++		if (read_poll_timeout(airoha_qdma_rr, data,
++				      data & TRTCM_PARAM_RW_DONE_MASK,
++				      USEC_PER_MSEC, 10 * USEC_PER_MSEC,
++				      true, qdma, REG_TRTCM_CFG_PARAM(addr)))
++			return -ETIMEDOUT;
++
 +		if (airoha_qdma_get_trtcm_param(qdma, channel, addr, param,
 +						mode, &data, NULL))
 +			continue;
 +
 +		if (data == val)
-+			break;
++			return 0;
 +	}
 +
-+	return i == 100 ? -EBUSY : 0;
++	return -EBUSY;
  }
  
  static int airoha_qdma_set_trtcm_config(struct airoha_qdma *qdma, int channel,
