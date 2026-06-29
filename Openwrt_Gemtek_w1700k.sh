@@ -31,7 +31,7 @@ readonly OPENWRT_REPO="https://github.com/openwrt/openwrt.git"
 #readonly OPENWRT_REPO="/home/user/openwrt/repos/openwrt"
 
 OPENWRT_BRANCH="master"
-readonly OPENWRT_COMMIT="cdf91585086e61a243db36fa61d155dcc2a515d3"
+readonly OPENWRT_COMMIT="a6ecb09985fa7c14bae1c1bad7d42495737bc0ba"
 
 # --- Directory and File Configuration ---
 readonly SOURCE_DEFAULT_CONFIG_DIR="config"
