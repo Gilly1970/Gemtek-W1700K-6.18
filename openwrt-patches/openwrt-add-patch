@@ -77,6 +77,9 @@ target/linux/airoha/patches-6.18/961-thermal-airoha-Fix-low-trip-clamp-using-wro
 target/linux/airoha/an7581/target.mk
 target/linux/airoha/base-files/etc/sysctl.d/13-nf-bridge.conf
 
+### GRO frag-list double-aggregation fix
+target/linux/generic/pending-6.18/992-net-gro-fix-double-aggregation-of-flush-marked-skbs.patch
+
 ### hostapd: mtk: 6G band does not require DFS
 package/network/services/hostapd/patches/015-mtk-hostapd-mtk-6G-band-does-not-require-DFS.patch
 

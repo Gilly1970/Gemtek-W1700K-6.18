@@ -1,0 +1,32 @@
+Subject: [PATCH net v3] net: gro: fix double aggregation of flush-marked skbs
+
+skb_gro_receive_list() only refuses to coalesce when the combined length
+would exceed 64 KiB, but unlike the non-list path skb_gro_receive() it
+never checks NAPI_GRO_CB(skb)->flush. An skb already marked for flush
+(must-not-coalesce) can therefore be merged into the frag_list, producing
+a doubly-aggregated super-frame with inconsistent length/checksum state.
+
+Add the same flush guard the regular GRO path already carries, so the two
+paths behave consistently and flush-marked skbs are never appended to a
+frag_list.
+
+Upstream net patch (v3). Local overlay for the W1700K 6.18 build until it
+lands in a 6.18.x stable / OpenWrt master sync; drop on dedup.
+---
+ net/core/gro.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/net/core/gro.c b/net/core/gro.c
+index 35f2f708f010..076247c1e662 100644
+--- a/net/core/gro.c
++++ b/net/core/gro.c
+@@ -229,7 +229,8 @@ int skb_gro_receive(struct sk_buff *p, struct sk_buff *skb)
+
+ int skb_gro_receive_list(struct sk_buff *p, struct sk_buff *skb)
+ {
+-	if (unlikely(p->len + skb->len >= 65536))
++	if (unlikely(p->len + skb->len >= 65536 ||
++		     NAPI_GRO_CB(skb)->flush))
+ 		return -E2BIG;
+
+ 	if (!pskb_may_pull(skb, skb_gro_offset(skb))) {
