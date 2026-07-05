@@ -77,6 +77,19 @@ grep -iE "ipv6" /proc/net/nf_conntrack 2>/dev/null | grep -iE "OFFLOAD|tcp|udp|i
 [ ! -s /proc/net/nf_conntrack ] && echo "    (nf_conntrack not readable)"
 
 echo
+echo "### WAN6 / RA / DHCPv6-PD log tail  (upstream-provisioning health) ##"
+echo "  -- recent odhcp6c / RA / DHCPv6 / prefix events (last 20):"
+LOG6="$(logread 2>/dev/null | grep -iE "odhcp6c|dhcpv6|router advert|prefix|IA_PD|solicit|renew|rebind" | tail -20)"
+if [ -n "$LOG6" ]; then
+	echo "$LOG6" | sed 's/^/    /'
+else
+	echo "    (nothing in log buffer - may have rotated; not necessarily a fault)"
+fi
+echo "  -- v6-related errors/warnings in log (last 15):"
+LOGERR="$(logread 2>/dev/null | grep -iE "ipv6|dhcpv6|odhcp|netifd" | grep -iE "err|fail|unreach|no route|timeout|expire|reject|drop" | tail -15)"
+[ -n "$LOGERR" ] && echo "$LOGERR" | sed 's/^/    /' || echo "    (none)"
+
+echo
 echo "### Delegated-prefix routing (the /60 tell-tale) ################"
 echo "  -- unreachable aggregate route(s) (present for /60+, absent for a bare /64):"
 ip -6 route show table all 2>/dev/null | grep -i unreachable | sed 's/^/    /'
