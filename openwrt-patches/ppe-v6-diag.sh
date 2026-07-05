@@ -163,6 +163,34 @@ awk -v win="$WATCH" '
 ' "$N" "$S1" "$S2"
 
 echo
+echo "### Raw FOE entry bytes  (what the HW actually got programmed) ##"
+echo "  For the VLAN black-hole hunt: on the IPv6 upload entry (egress wan.<vid>),"
+echo "  check eth=SMAC->DMAC (v6 uses an SMAC-ID table, not an inline MAC),"
+echo "  etype (want 86dd), and vlan=<vid>,<vid2>.  Compare against a working IPv4"
+echo "  line: if the v6 SMAC or vlan= differs from the v4 one, that's the smoking gun."
+echo "  ib1 decode: VLAN_LAYER=bits19:16  VPM=bits21:20  (both = #vlan tags to push)"
+echo
+echo "  -- IPv6 bind entries (raw):"
+grep -E 'IPv6 ' "$S2" 2>/dev/null | sed 's/^/    /'
+[ -z "$(grep -E 'IPv6 ' "$S2" 2>/dev/null)" ] && echo "    (none bound)"
+echo "  -- IPv4 bind entries (raw, working reference - up to 4):"
+grep -E 'IPv4 ' "$S2" 2>/dev/null | head -4 | sed 's/^/    /'
+[ -z "$(grep -E 'IPv4 ' "$S2" 2>/dev/null)" ] && echo "    (none bound)"
+# decode VLAN_LAYER / VPM from ib1 (busybox awk has no strtonum: slice hex nibbles).
+# ib1 is printed as %08x -> 8 hex chars. char4=bits19:16 (VLAN_LAYER), char3=bits23:20 (VPM=low 2 bits)
+awk '
+	function hex1(c){ c=tolower(c); if (c ~ /^[0-9]$/) return c+0; return index("abcdef",c)+9 }
+	/IPv6 / {
+		ib1=""
+		for (k=1;k<=NF;k++) if ($k ~ /^ib1=/) ib1=substr($k,5)
+		if (length(ib1)!=8) next
+		vlan_layer=hex1(substr(ib1,4,1))     # bits 19..16
+		vpm=hex1(substr(ib1,3,1))%4          # bits 21..20
+		printf "    ib1[%s]=%s -> VLAN_LAYER=%d VPM=%d (both should = #tags pushed on egress)\n", $1, ib1, vlan_layer, vpm
+	}
+' "$S2" 2>/dev/null
+
+echo
 echo "### Traffic flow over the window  (where does it stop?) ########"
 echo "  RX = packets the iface received, TX = packets it sent, DROP = dropped."
 echo "  Download stalling: WAN RX climbs but LAN TX flat = forwarding black-hole."
