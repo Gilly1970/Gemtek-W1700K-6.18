@@ -1,0 +1,14 @@
+diff --git a/drivers/net/ethernet/airoha/airoha_eth.c b/drivers/net/ethernet/airoha/airoha_eth.c
+index 59001fd4b6f7..fac2aaefffff 100644
+--- a/drivers/net/ethernet/airoha/airoha_eth.c
++++ b/drivers/net/ethernet/airoha/airoha_eth.c
+@@ -2504,8 +2504,7 @@ static int airoha_tc_setup_qdisc_ets(struct net_device *dev,
+ 	if (opt->parent == TC_H_ROOT)
+ 		return -EINVAL;
+ 
+-	channel = TC_H_MAJ(opt->handle) >> 16;
+-	channel = channel % AIROHA_NUM_QOS_CHANNELS;
++	channel = TC_H_MIN(opt->parent) % AIROHA_NUM_QOS_CHANNELS;
+ 
+ 	switch (opt->command) {
+ 	case TC_ETS_REPLACE:
