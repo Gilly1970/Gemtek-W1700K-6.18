@@ -6,15 +6,18 @@ mt7996: handle truncated PKT_TYPE_TXRX_NOTIFY descriptors from AN7581 NPU
 The Airoha AN7581 NPU occasionally emits tx_free descriptors where
 MT_TXFREE0_MSDU_CNT exceeds the number of MSDUs actually DMA'd. The
 loop trusts the header count, hits the buffer boundary, and fires
-WARN_ON_ONCE — a noisy splat for a firmware quirk we cannot fix in the
+WARN_ON_ONCE - a noisy splat for a firmware quirk we cannot fix in the
 driver.
 
 In all observed cases the parser stops exactly at the skb boundary
 (over_by=0), so no out-of-bounds read occurs. Stop cleanly at the real
 buffer edge with `break` rather than `return`, so txwi/skbs already
 collected before the truncation are still released and tx queues remain
-unblocked. Replace the WARN with a rate-limited pr_info so the quirk
-remains observable.
+unblocked.
+
+The condition is benign and self-healing, so demote the notice to
+pr_debug: it stays observable via dynamic debug when investigating, but
+produces no log output (no alarming warning) in a normal build.
 
 ---
  mt7996/mac.c | 7 +++++--
@@ -31,8 +34,8 @@ index 367b51a..bda0afa 100644
 -		if (WARN_ON_ONCE((void *)cur_info >= end))
 -			return;
 +		if ((void *)cur_info >= end) {
-+			pr_warn_ratelimited("mt7996: tx_free truncated, count=%u total=%u len=%d ver=%u\n",
-+					    count, total, len, ver);
++			pr_debug("mt7996: tx_free truncated, count=%u total=%u len=%d ver=%u\n",
++				 count, total, len, ver);
 +			break;
 +		}
  		/* 1'b1: new wcid pair.
