@@ -79,6 +79,9 @@ target/linux/airoha/patches-6.18/961-thermal-airoha-Fix-low-trip-clamp-using-wro
 target/linux/airoha/patches-6.18/962-net-airoha-fix-ETS-channel-derivation-in-airoha_tc_setup_qdisc_ets.patch
 target/linux/airoha/patches-6.18/963-net-airoha-fix-MIB-stats-collection-to-be-lossless.patch
 
+### Test - IPv6 route + VLAN black-holes on the WAN uplink (GDM2 loopback)
+target/linux/airoha/patches-6.18/965-net-airoha-disable-hw-offload-for-ipv6-vlan-uplink-only.patch
+
 ### enable bridge offload for AN7581 target
 target/linux/airoha/an7581/target.mk
 target/linux/airoha/base-files/etc/sysctl.d/13-nf-bridge.conf
