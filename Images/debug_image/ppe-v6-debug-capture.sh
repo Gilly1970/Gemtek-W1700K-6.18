@@ -1,16 +1,4 @@
 #!/bin/sh
-# W1700K IPv6 PPE debug capture (disc #18)
-# Run this ON THE ROUTER while an IPv6 iperf3/download is running on your LAN/WiFi client.
-# It grabs the debug image's offload-path logging + the ppe-v6-diag snapshot,
-# so a stalling box and a working box can be compared like-for-like.
-#
-# Usage:
-#   1) copy ppe-v6-diag.sh to /tmp on the router
-#   2) on your client:   iperf3 -c <your-v6-iperf-server> -R -t 30 -p <port>
-#                        (or any sustained IPv6 download, e.g. a bufferbloat test)
-#   3) ~3s later, on the router:   sh /tmp/ppe-v6-debug-capture.sh
-#   4) note whether that transfer STALLED or COMPLETED (+ rough speed), then
-#      paste the whole /tmp/ppe-v6-debug.log
 OUT=/tmp/ppe-v6-debug.log
 
 {
