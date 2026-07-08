@@ -107,8 +107,12 @@ cat /proc/net/dev > "$D2" 2>/dev/null
 
 echo
 echo "### Hardware-bound IPv6 flows  (window = ${WATCH}s) #############"
-echo "  legend: PKT_DELTA = packets the PPE forwarded in the window."
-echo "          A climbing delta while the client sees nothing = HW black-hole."
+echo "  legend: PKT_DELTA = per-entry packet delta over the window."
+echo "  !! UNRELIABLE on AN7581 (2026-07-08): the counter is fed from NPU per-entry"
+echo "  !! stats which this firmware does NOT populate -> it reads 0 even for flows"
+echo "  !! that ARE forwarding fine (verified: working IPv4 entries also show 0)."
+echo "  !! DO NOT treat PKT_DELTA=0 as a black-hole. Judge by: (a) did the transfer"
+echo "  !! actually STALL, (b) the interface RX-vs-TX table below, (c) DBG path lines."
 echo
 
 awk -v win="$WATCH" '
@@ -242,13 +246,18 @@ echo
 echo " [INCONCLUSIVE] Traffic table all-zero -> nothing was flowing; the client"
 echo "         wasn't actually downloading. Re-run under real load."
 echo
-echo " [HW BUG] WAN RX_pkts CLIMBS but LAN TX_pkts stays FLAT (or vice-versa)"
-echo "          AND the flow shows [OFFLOAD] in conntrack AND PPE PKT_DLT is 0"
-echo "          -> packets enter, get handed to HW, and vanish = PPE black-hole."
-echo " [HW BUG] PKT_DLT CLIMBS to a NULL/unknown/stale NEXTHOP_MAC while the"
-echo "          client stalls -> HW forwarding to a dead next-hop = black-hole."
-echo " [HW BUG] NEXTHOP_MAC is REACHABLE + PKT_DLT climbs + client still stalls"
-echo "          -> PPE IPv6-route (non-NAT) mishandling. The 'meta nfproto ipv4'"
-echo "          workaround (v4-only offload) should make the stall disappear;"
-echo "          that A/B is the definitive confirmation."
+echo " NOTE (2026-07-08): IGNORE PKT_DLT here - it is unreliable on AN7581 (NPU"
+echo " does not populate per-entry stats; reads 0 even for working flows). Use the"
+echo " REAL signals below instead."
+echo
+echo " [HW BUG] The transfer actually STALLS (client gets ~nothing / times out)"
+echo "          AND the interface table shows WAN RX_pkts CLIMBING while the"
+echo "          client-facing TX (LAN/WiFi) stays ~FLAT -> packets enter, get"
+echo "          handed to HW, and vanish = PPE black-hole. (This is the ground"
+echo "          truth: a genuine stall + WAN-in >> client-out.)"
+echo " [CONFIRM] Re-run with 'flow_offloading_hw=0' (or a 'meta nfproto ipv4'"
+echo "          flowtable). If the SAME transfer now COMPLETES -> confirmed the"
+echo "          PPE HW offload was black-holing it. That A/B is definitive."
+echo " [OK]     Transfer COMPLETES (even if PKT_DLT reads 0) -> NOT black-holing;"
+echo "          PKT_DLT=0 is just the dead NPU counter, not a fault."
 echo "=================================================================="
