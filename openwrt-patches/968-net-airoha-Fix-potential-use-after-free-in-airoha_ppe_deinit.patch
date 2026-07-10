@@ -1,0 +1,12 @@
+diff --git a/drivers/net/ethernet/airoha/airoha_ppe.c b/drivers/net/ethernet/airoha/airoha_ppe.c
+index e7c78293002a..f6396925722d 100644
+--- a/drivers/net/ethernet/airoha/airoha_ppe.c
++++ b/drivers/net/ethernet/airoha/airoha_ppe.c
+@@ -1659,6 +1659,7 @@ void airoha_ppe_deinit(struct airoha_eth *eth)
+ 	npu = rcu_replace_pointer(eth->npu, NULL,
+ 				  lockdep_is_held(&flow_offload_mutex));
+ 	if (npu) {
++		synchronize_rcu();
+ 		npu->ops.ppe_deinit(npu);
+ 		airoha_npu_put(npu);
+ 	}

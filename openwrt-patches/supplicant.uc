@@ -21,7 +21,7 @@ function set_fixed_freq(data, config) {
 	else if (data.htmode in [ 'VHT160', 'HE160', 'EHT160' ])
 		set_default(config, 'max_oper_chwidth', 2);
 	else if (data.htmode in [ 'EHT320' ])
-		set_default(config, 'max_oper_chwidth', 4);
+		set_default(config, 'max_oper_chwidth', 9);
 	else if (data.htmode in [ 'VHT20', 'VHT40', 'HE20', 'HE40', 'EHT20', 'EHT40' ])
 		set_default(config, 'max_oper_chwidth', 0);
 	else
@@ -155,11 +155,29 @@ function setup_sta(data, config) {
 		if (config.ca_cert_usesystem && fs.stat('/etc/ssl/certs/ca-certificates.crt'))
 			config.ca_cert = '/etc/ssl/certs/ca-certificates.crt';
 
+		const eap_method_map = { fast: 'FAST', peap: 'PEAP', ttls: 'TTLS', tls: 'TLS' };
+		if (eap_method_map[config.eap_type])
+			config.eap = eap_method_map[config.eap_type];
+
 		switch(config.eap_type) {
 		case 'fast':
 		case 'peap':
 		case 'ttls':
 			set_default(config, 'auth', 'MSCHAPV2');
+
+			let auth = config.auth;
+			let phase2proto = 'auth=';
+			if (index(auth, 'auth') == 0) {
+				/* user already provided a full "auth=..." spec */
+				phase2proto = '';
+			} else if (index(auth, 'EAP-') == 0) {
+				/* inner EAP method, e.g. EAP-MSCHAPV2 -> MSCHAPV2 */
+				auth = substr(auth, 4);
+				if (config.eap_type == 'ttls')
+					phase2proto = 'autheap=';
+			}
+			config.phase2 = `"${phase2proto}${auth}"`;
+
 			if (config.auth == 'EAP-TLS') {
 				if (config.ca_cert2_usesystem && fs.stat('/etc/ssl/certs/ca-certificates.crt'))
 					config.ca_cert2 = '/etc/ssl/certs/ca-certificates.crt';
@@ -176,12 +194,41 @@ function setup_sta(data, config) {
 
 	config.key_mgmt ??= 'NONE';
 
-	config.basic_rate = ratelist(config.basic_rate);
+	/*
+	 * Map UCI basic_rate to the correct wpa_supplicant network field:
+	 *   mesh  -> mesh_basic_rates  (space-separated, 100 kb/s units)
+	 *   other -> rates             (comma-separated Mbps, e.g. "5.5,11")
+	 * "basic_rate" itself is not a valid wpa_supplicant network field.
+	 */
+	let brates = config.basic_rate;
+	config.basic_rate = null;
+	if (brates != null && length(brates) > 0) {
+		if (config.mode == 'mesh')
+			config.mesh_basic_rates = join(" ", map(brates, (br) => "" + int(br / 100)));
+		else
+			config.rates = ratelist(brates);
+	}
+
 	config.mcast_rate = ratestr(config.mcast_rate);
+
+	/*
+	 * Certificate constraint lists are semicolon-separated strings in the
+	 * wpa_supplicant config, while UCI stores them as arrays. Join them here
+	 * so they are emitted as a single quoted value below.
+	 */
+	for (let key in [ 'altsubject_match', 'altsubject_match2',
+			  'domain_match', 'domain_match2',
+			  'domain_suffix_match', 'domain_suffix_match2' ])
+		if (type(config[key]) == 'array')
+			config[key] = length(config[key]) ? join(';', config[key]) : null;
 
 	network_append_string_vars(config, [ 'ssid',
 		'identity', 'anonymous_identity', 'password',
-		'ca_cert', 'ca_cert2', 'client_cert', 'client_cert2', 'subject_match',
+		'ca_cert', 'ca_cert2', 'client_cert', 'client_cert2',
+		'subject_match', 'subject_match2',
+		'altsubject_match', 'altsubject_match2',
+		'domain_match', 'domain_match2',
+		'domain_suffix_match', 'domain_suffix_match2',
 		'private_key', 'private_key_passwd', 'private_key2', 'private_key2_passwd',
 		 ]);
 	network_append_vars(config, [
@@ -189,9 +236,8 @@ function setup_sta(data, config) {
 		'ocv', 'beacon_prot', 'key_mgmt', 'sae_pwe', 'psk', 'sae_password', 'pairwise', 'group', 'bssid',
 		'proto', 'mesh_fwding', 'mesh_rssi_threshold', 'frequency', 'fixed_freq',
 		'disable_ht', 'disable_ht40', 'disable_vht', 'vht', 'max_oper_chwidth',
-		'ht40', 'beacon_int', 'ieee80211w', 'basic_rate', 'mcast_rate',
-		'altsubject_match', 'domain_match', 'domain_suffix_match',
-		'bssid_blacklist', 'bssid_whitelist', 'erp',
+		'ht40', 'beacon_int', 'ieee80211w', 'rates', 'mesh_basic_rates', 'mcast_rate',
+		'bssid_blacklist', 'bssid_whitelist', 'erp', 'eap', 'phase2',
 		'dpp_connector', 'dpp_csign', 'dpp_netaccesskey',
 	]);
 }
