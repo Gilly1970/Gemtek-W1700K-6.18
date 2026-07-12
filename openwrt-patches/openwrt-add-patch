@@ -125,3 +125,10 @@ rtl8261ce/Makefile:target/linux/generic/files/drivers/net/phy/rtl8261ce/Makefile
 rtl8261ce/rtk_rtl8261ce_phy.c:target/linux/generic/files/drivers/net/phy/rtl8261ce/rtk_rtl8261ce_phy.c
 rtl8261ce/rtk_rtl8261ce_patch.h:target/linux/generic/files/drivers/net/phy/rtl8261ce/rtk_rtl8261ce_patch.h
 target/linux/generic/hack-6.18/999-net-phy-realtek-rtl8261ce.patch
+
+### mt7996 firmware txpower limit patch set (Yanghan Ye, 2026-06-24):
+0010-enable-firmware-txpower-limit.patch:package/kernel/mt76/patches/0010-enable-firmware-txpower-limit.patch
+0011-refresh-power-limits-on-txpower-changes.patch:package/kernel/mt76/patches/0011-refresh-power-limits-on-txpower-changes.patch
+999-fix-txpower-list.patch:package/network/utils/iwinfo/patches/999-fix-txpower-list.patch
+mac80211.sh:package/network/config/wifi-scripts/files-ucode/lib/netifd/wireless/mac80211.sh
+wifi-scripts-Makefile:package/network/config/wifi-scripts/Makefile
