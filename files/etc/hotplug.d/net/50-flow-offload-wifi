@@ -19,14 +19,24 @@ esac
 # Skip if the device is already in the flowtable (fw4 picked it up).
 nft list flowtable inet fw4 ft 2>/dev/null | grep -qw "\"$DEV\"" && exit 0
 
-# fw4 auto-discovers bridge members on reload. Serialize via flock so
-# concurrent hotplug events don't trigger multiple reloads - the last
-# one after all WiFi interfaces are up will be enough.
+# fw4 auto-discovers bridge members on reload. Serialize via flock,
+# WAITING for any in-flight reload rather than skipping: a reload that
+# started before this device existed snapshots the device list without
+# it, so bailing out here leaves the device unoffloaded until the next.
 (
+	mkdir -p /var/lock
 	exec 9>/var/lock/flow-offload-wifi.lock
-	flock -n 9 || exit 0
+	flock 9
+	# Re-check after acquiring: the reload we waited on may have
+	# already picked this device up.
+	nft list flowtable inet fw4 ft 2>/dev/null | grep -qw "\"$DEV\"" && exit 0
 	sleep 2
 	/etc/init.d/firewall reload >/dev/null 2>&1
+	if nft list flowtable inet fw4 ft 2>/dev/null | grep -qw "\"$DEV\""; then
+		logger -t flow-offload-wifi "fw4 reloaded, $DEV added to flowtable"
+	else
+		logger -t flow-offload-wifi "WARNING: $DEV still missing from flowtable after fw4 reload"
+	fi
 ) &
 
 exit 0
