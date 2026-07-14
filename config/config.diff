@@ -32,14 +32,19 @@ CONFIG_PACKAGE_luci-theme-bootstrap=y
 
 # Network Support
 
-CONFIG_PACKAGE_kmod-sched-bpf=m
-CONFIG_PACKAGE_kmod-sched-cake=m
-CONFIG_PACKAGE_kmod-sched-core=m
-CONFIG_PACKAGE_kmod-sched-flower=m
+CONFIG_PACKAGE_kmod-sched-bpf=y
+CONFIG_PACKAGE_kmod-sched-cake=y
+CONFIG_PACKAGE_kmod-sched-core=y
+CONFIG_PACKAGE_kmod-sched-flower=y
 
 # Network Support
 
 CONFIG_PACKAGE_kmod-br-netfilter=y
+
+# TPROXY
+
+CONFIG_PACKAGE_kmod-nft-tproxy=y
+CONFIG_PACKAGE_kmod-nft-socket=y
 
 # Hardware crypto (EIP93 — DES/3DES/AES + IPsec offload; DT node already in an7581.dtsi)
 
@@ -55,9 +60,9 @@ CONFIG_PACKAGE_nano=y
 
 # VPN
 
-CONFIG_PACKAGE_kmod-wireguard=m
-CONFIG_PACKAGE_luci-proto-wireguard=m
-CONFIG_PACKAGE_wireguard-tools=m
+CONFIG_PACKAGE_kmod-wireguard=y
+CONFIG_PACKAGE_luci-proto-wireguard=y
+CONFIG_PACKAGE_wireguard-tools=y
 
 # arp-scan
 
