@@ -28,16 +28,30 @@ OUT=/tmp/ppe-v6-debug.log
     echo "!! /tmp/ppe-v6-diag.sh not found -- copy it to /tmp first"
   fi
   echo
+  echo "########## airoha_ppe DBG: source-MAC table (UPDMEM) -- written at BOOT ##########"
+  echo "# IPv6 egress resolves its source MAC from this per-port table; IPv4 uses an inline MAC."
+  echo "# Compare the WAN port's mac= here against your ACTUAL wan MAC (ip link show wan)."
+  echo "# If they differ (e.g. you clone your WAN MAC), that's the bug."
+  dmesg | grep -E 'airoha_ppe DBG (UPDMEM|SET_MAC)' || \
+    echo "(none -- did you REBOOT after flashing? these are only printed at boot,"
+  echo " and can scroll out of dmesg on a long-running box.)"
+  echo
   echo "########## airoha_ppe DBG offload-path lines (last 60) ##########"
   echo "# path=WDMA-wifi  = flow egresses to a WiFi client (WED path)"
   echo "# path=GDM-eth pse_port=2 loopback=1 = WAN uplink via GDM2 loopback"
   echo "# path=GDM-eth ... lan=1 = wired LAN egress"
-  echo "# (compare vlan= : 0 = untagged, >0 = tagged WAN -- the suspected trigger)"
-  dmesg | grep 'airoha_ppe DBG' | tail -60 || true
+  echo "# (compare vlan= : 0 = untagged, >0 = tagged WAN)"
+  dmesg | grep 'airoha_ppe DBG v6' | tail -60 || true
   if ! dmesg | grep -q 'airoha_ppe DBG'; then
     echo "(NONE found -- either no IPv6 flow offloaded during the window,"
     echo " or this is NOT the debug image. Confirm the download was running + hw=1.)"
   fi
+  echo
+  echo "########## your real WAN MAC (compare against the UPDMEM table above) ##########"
+  for i in wan wan.100 eth1; do
+    ip link show "$i" 2>/dev/null | awk '/link\/ether/{print "  '"$i"': "$2}'
+  done
+  uci -q show network | grep -i macaddr | sed 's/^/  uci: /'
   echo "================= END ================="
 } > "$OUT" 2>&1
 cat "$OUT"

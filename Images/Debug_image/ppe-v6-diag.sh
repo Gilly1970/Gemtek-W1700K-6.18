@@ -40,6 +40,7 @@ else
 	echo "    !! internet. Every v6 flow will stall regardless of PPE. Fix WAN6 RA/DHCPv6-PD"
 	echo "    !! before blaming offload."
 fi
+
 GSRC="$(ip -6 addr show scope global 2>/dev/null | awk '/inet6/{print $2}' | grep -vi '^fe80' | cut -d/ -f1 | head -1)"
 echo "  -- can the router route to the v6 internet? (route get 2606:4700:4700::1111${GSRC:+ from $GSRC}):"
 ip -6 route get 2606:4700:4700::1111 ${GSRC:+from "$GSRC"} 2>&1 | head -1 | sed 's/^/    /'
