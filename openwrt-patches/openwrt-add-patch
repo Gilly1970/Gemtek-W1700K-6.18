@@ -26,9 +26,6 @@ package/network/services/hostapd/patches/060-nl80211-fix-reporting-spurious-fram
 ### mt76 source bump to upstream HEAD (2026-07-01)
 mt76-Makefile:package/kernel/mt76/Makefile
 
-### fix RTL8261N PHY boot failure
-an7581-w1700k-ubi2.dts:target/linux/airoha/dts/an7581-w1700k-ubi2.dts
-
 ### fix cpufreq and PM domain drivers for AN7581
 target/linux/airoha/dts/an7581.dtsi
 
@@ -78,7 +75,7 @@ target/linux/airoha/patches-6.18/960-thermal-airoha-Fix-FIELD_PREP-using-wrong-m
 target/linux/airoha/patches-6.18/961-thermal-airoha-Fix-low-trip-clamp-using-wrong-variable.patch
 target/linux/airoha/patches-6.18/962-net-airoha-fix-ETS-channel-derivation-in-airoha_tc_setup_qdisc_ets.patch
 target/linux/airoha/patches-6.18/963-net-airoha-fix-MIB-stats-collection-to-be-lossless.patch
-target/linux/airoha/patches-6.18/965-net-airoha-disable-hw-offload-for-ipv6-vlan-uplink-only.patch
+#target/linux/airoha/patches-6.18/965-net-airoha-disable-hw-offload-for-ipv6-vlan-uplink-only.patch
 target/linux/airoha/patches-6.18/968-net-airoha-Fix-potential-use-after-free-in-airoha_ppe_deinit.patch
 
 ### enable bridge offload for AN7581 target
@@ -133,3 +130,13 @@ target/linux/generic/hack-6.18/999-net-phy-realtek-rtl8261ce.patch
 999-fix-txpower-list.patch:package/network/utils/iwinfo/patches/999-fix-txpower-list.patch
 mac80211.sh:package/network/config/wifi-scripts/files-ucode/lib/netifd/wireless/mac80211.sh
 wifi-scripts-Makefile:package/network/config/wifi-scripts/Makefile
+
+### VLAN fixes
+### 802 = fix CPU port VLAN not being reset to unaware (upstream 2c4c76cacc9d, Daniel Golle).
+target/linux/generic/backport-6.18/802-v7.1-net-dsa-mt7530-fix-CPU-port-VLAN-not-being-reset-to-unaware.patch
+
+### VLAN-aware bridge frames reach the CPU carrying a spurious PVID tag (upstream 4cb3cd670b2a)
+target/linux/generic/backport-6.18/803-v7.1-net-dsa-mt7530-untag-VLAN-aware-bridge-PVID.patch
+
+### indexed by port->id), so routed IPv6 egressing one port with two different source MACs
+target/linux/airoha/patches-6.18/971-net-airoha-sync-UPDMEM-source-MAC-for-offloaded-IPv6.patch

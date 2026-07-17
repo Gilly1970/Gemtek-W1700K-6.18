@@ -1,0 +1,30 @@
+From 4cb3cd670b2a29e52dd3cfd6463e44121674c9b8 Mon Sep 17 00:00:00 2001
+From: Edward Parker <edward.parker@example.com>
+Subject: [PATCH] net: dsa: mt7530: untag VLAN-aware bridge PVID
+
+MT7530 sends packets to the CPU port tagged with the bridge PVID even when
+the packet arrived untagged on the wire. The DSA core can strip that tag
+(dsa_software_vlan_untag) but only when the driver opts in. Set
+untag_vlan_aware_bridge_pvid so VLAN-aware bridge PVID traffic is untagged.
+
+Backport of upstream 4cb3cd670b2a (v7.1) to 6.18 -- the DSA core support is
+already present in 6.18 (net/dsa/tag.{c,h}); only the mt7530 opt-in is missing.
+---
+--- a/drivers/net/dsa/mt7530.c
++++ b/drivers/net/dsa/mt7530.c
+@@ -2419,6 +2419,7 @@
+ 	}
+ 
+ 	ds->assisted_learning_on_cpu_port = true;
++	ds->untag_vlan_aware_bridge_pvid = true;
+ 	ds->mtu_enforcement_ingress = true;
+ 	ds->ageing_time_min = 2 * 1000;
+ 	ds->ageing_time_max = (AGE_CNT_MAX + 1) * (AGE_UNIT_MAX + 1) * 1000;
+@@ -2610,6 +2611,7 @@
+ 	int ret, i;
+ 
+ 	ds->assisted_learning_on_cpu_port = true;
++	ds->untag_vlan_aware_bridge_pvid = true;
+ 	ds->mtu_enforcement_ingress = true;
+ 	ds->ageing_time_min = 2 * 1000;
+ 	ds->ageing_time_max = (AGE_CNT_MAX + 1) * (AGE_UNIT_MAX + 1) * 1000;

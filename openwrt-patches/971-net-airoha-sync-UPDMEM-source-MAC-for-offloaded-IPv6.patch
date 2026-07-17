@@ -1,0 +1,84 @@
+From: Gilly1970 <gilroyscott1970@gmail.com>
+Subject: [PATCH] net: airoha: sync UPDMEM source MAC for offloaded IPv6 flows
+
+IPv6 flow entries have no room for an inline source MAC: unlike IPv4, which
+stores the full address in the entry, they only carry a 4-bit smac_id and the
+hardware builds the L2 header from UPDMEM[smac_id] at transmit time.
+
+UPDMEM is only written from airoha_ppe_init_upd_mem(), whose sole caller is
+airoha_set_macaddr() - reachable only from the airoha net_device's own
+ndo_set_mac_address. Setting the MAC on a stacked device instead goes through
+that device's ndo (e.g. vlan_dev_set_mac_address for an 8021q upper) and never
+reaches the airoha driver, so the UPDMEM slot keeps the address of the base
+device.
+
+That is harmless while the upper inherits the base MAC, but a VLAN upper with a
+cloned MAC address makes the hardware transmit offloaded IPv6 with the stale
+base address while IPv4 - which carries the correct address inline - keeps
+working. On a MAC-bound ISP the mismatched IPv6 frames are dropped upstream and
+the flow black-holes as soon as it is promoted to hardware; disabling hardware
+offload restores it because the software path uses the net_device address.
+
+Fix it by keeping the slot in sync with the source MAC the offloaded flow is
+actually going to use, which the flow dissector already provides and which
+airoha_ppe_flow_offload_replace() has already validated. Cache the programmed
+value per port so the register write only happens when it changes.
+
+Reported-by: tompointexe
+Signed-off-by: Gilly1970 <gilroyscott1970@gmail.com>
+---
+--- a/drivers/net/ethernet/airoha/airoha_eth.h
++++ b/drivers/net/ethernet/airoha/airoha_eth.h
+@@ -605,6 +605,9 @@
+ 	int id;
+ 	int users;
+ 
++	/* source MAC currently programmed in UPDMEM[id] */
++	u8 smac[ETH_ALEN];
++
+ 	/* protect concurrent hw_stats and frag register accesses */
+ 	spinlock_t lock;
+ 
+--- a/drivers/net/ethernet/airoha/airoha_ppe.c
++++ b/drivers/net/ethernet/airoha/airoha_ppe.c
+@@ -339,6 +339,21 @@
+ 	br->src_mac_lo = get_unaligned_be32(eh->h_source + 2);
+ }
+ 
++/* IPv6 flow entries have no room for an inline source MAC: the hw builds the
++ * L2 header from UPDMEM[smac_id] instead. That table is only refreshed when the
++ * MAC of the airoha net_device itself is set, so a stacked device carrying a
++ * different MAC (e.g. a VLAN upper with a cloned address) would make the hw
++ * transmit IPv6 with a stale source MAC. Keep the slot in sync with the address
++ * the offloaded flow actually egresses with.
++ */
++static void airoha_ppe_sync_upd_mem(struct airoha_gdm_dev *dev, const u8 *addr)
++{
++	if (ether_addr_equal(dev->port->smac, addr))
++		return;
++
++	airoha_ppe_init_upd_mem(dev, addr);
++}
++
+ static int airoha_ppe_foe_entry_prepare(struct airoha_eth *eth,
+ 					struct airoha_foe_entry *hwe,
+ 					struct net_device *netdev, int type,
+@@ -416,6 +431,9 @@
+ 						  dsa_port);
+ 
+ 			smac_id = port->id;
++			if (type >= PPE_PKT_TYPE_IPV6_ROUTE_3T)
++				airoha_ppe_sync_upd_mem(dev,
++							data->eth.h_source);
+ 		}
+ 	}
+ 
+@@ -1545,6 +1563,8 @@
+ 		     FIELD_PREP(PPE_UPDMEM_ADDR_MASK, port->id) |
+ 		     FIELD_PREP(PPE_UPDMEM_OFFSET_MASK, 1) |
+ 		     PPE_UPDMEM_WR_MASK | PPE_UPDMEM_REQ_MASK);
++
++	ether_addr_copy(port->smac, addr);
+ }
+ 
+ struct airoha_ppe_dev *airoha_ppe_get_dev(struct device *dev)
