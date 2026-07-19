@@ -1,0 +1,37 @@
+From: Gilly1970 <gilroyscott1970@gmail.com>
+Subject: [PATCH] wifi: mt76: mt7996: radar mis-attribution bug
+
+Radar events are broadcast to all radios instead of attributed to the one that detected them.
+
+Pass the detecting phy's channel context instead, so only the affected
+band is marked. Fall back to NULL (current behaviour) if the phy has no
+chanctx at the time of the event.
+
+Signed-off-by: Gilly1970 <gilroyscott1970@gmail.com>
+---
+--- a/mt7996/mcu.c
++++ b/mt7996/mcu.c
+@@ -791,10 +791,22 @@
+ 						&dev->rdd2_chandef,
+ 						GFP_ATOMIC);
+ 	} else {
++		struct ieee80211_chanctx_conf *conf = NULL;
+ 		struct mt7996_phy *phy = mphy->priv;
+ 
++		/* All bands share one wiphy: radar reported with a NULL
++		 * chanctx marks every channel context, so each BSS logs a
++		 * radar event at its own frequency (e.g. on 2.4 GHz where
++		 * no radar detector exists). Report it on the detecting
++		 * band's context only.
++		 */
++		if (mphy->chanctx)
++			conf = container_of((void *)mphy->chanctx,
++					    struct ieee80211_chanctx_conf,
++					    drv_priv);
++
+ 		phy->rdd_tx_paused = true;
+-		ieee80211_radar_detected(mphy->hw, NULL);
++		ieee80211_radar_detected(mphy->hw, conf);
+ 	}
+ 	dev->hw_pattern++;
+ 
