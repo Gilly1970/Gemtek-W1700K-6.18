@@ -1,0 +1,188 @@
+From: Gilly1970 <gilroyscott1970@gmail.com>
+Subject: [PATCH] net: airoha: allocate UPDMEM slots per IPv6 egress source MAC
+
+The UPDMEM source-MAC table has 16 slots and FOE entries address it with a
+5-bit smac_id, but the driver only ever uses one slot per GDM port
+(slot == port->id). With the UPDMEM sync fix in place, two flows egressing
+one port with different source MACs (e.g. routed IPv6 on both the base
+device and a VLAN upper carrying a cloned address) fight over that single
+slot: whichever flow was programmed last wins, and packets of the other
+egress with a wrong source MAC.
+
+Turn the slot into an allocation: the port's base MAC keeps slot port->id,
+and additional egress source MACs get a dynamic slot (5..14) on first use,
+so every bound IPv6 entry references a slot that permanently holds its own
+MAC. Slots are sticky while the device is up - never re-assigned - so a
+bound entry can never see its source MAC change underneath it. If all
+dynamic slots are taken (more than 10 distinct extra MACs), decline the
+offload with -EOPNOTSUPP so the flow stays on the software path, which uses
+the correct net_device address. All UPDMEM writes now happen under a
+spinlock, closing the race between flow setup (workqueue) and
+ndo_set_mac_address (rtnl) that the previous code left open.
+
+Slot allocations are logged (they are rare, at most 10 per boot), so field
+reports show exactly which MACs went to which slots.
+
+Signed-off-by: Gilly1970 <gilroyscott1970@gmail.com>
+---
+--- a/drivers/net/ethernet/airoha/airoha_eth.h
++++ b/drivers/net/ethernet/airoha/airoha_eth.h
+@@ -668,8 +668,23 @@
+ 
+ 	struct airoha_qdma qdma[AIROHA_MAX_NUM_QDMA];
+ 	struct airoha_gdm_port *ports[AIROHA_MAX_NUM_GDM_PORTS];
++
++	/* UPDMEM source-MAC table state. Slots 1..AIROHA_MAX_NUM_GDM_PORTS
++	 * hold the GDM ports' base MACs; AIROHA_UPDMEM_DYN_FIRST..LAST are
++	 * allocated on demand for additional egress source MACs (e.g. a
++	 * cloned address on a VLAN upper). Slot 0xf is the FOE entries'
++	 * "unused" marker and is never programmed. Sticky: a slot is never
++	 * re-assigned while the device is up, so bound FOE entries can
++	 * never see their source MAC change under them.
++	 */
++	spinlock_t updmem_lock;
++	u16 updmem_used;
++	u8 updmem_mac[16][ETH_ALEN];
+ };
+ 
++#define AIROHA_UPDMEM_DYN_FIRST		(AIROHA_MAX_NUM_GDM_PORTS + 1)
++#define AIROHA_UPDMEM_DYN_LAST		14
++
+ u32 airoha_rr(void __iomem *base, u32 offset);
+ void airoha_wr(void __iomem *base, u32 offset, u32 val);
+ u32 airoha_rmw(void __iomem *base, u32 offset, u32 mask, u32 val);
+--- a/drivers/net/ethernet/airoha/airoha_ppe.c
++++ b/drivers/net/ethernet/airoha/airoha_ppe.c
+@@ -346,12 +346,55 @@
+  * transmit IPv6 with a stale source MAC. Keep the slot in sync with the address
+  * the offloaded flow actually egresses with.
+  */
+-static void airoha_ppe_sync_upd_mem(struct airoha_gdm_dev *dev, const u8 *addr)
++static void airoha_ppe_write_upd_mem(struct airoha_eth *eth, u8 slot,
++				     const u8 *addr);
++
++/* IPv6 FOE entries carry only a slot index (smac_id); the hw resolves the
++ * egress source MAC from UPDMEM[smac_id] at transmit time. Return the slot
++ * holding @addr, allocating a dynamic one on first use so flows with
++ * different source MACs on one port (e.g. the base device and a VLAN upper
++ * with a cloned address) each keep their own correct MAC. Returns -ENOSPC
++ * when all dynamic slots hold other MACs; the caller should leave the flow
++ * on the software path, which uses the correct net_device address.
++ */
++static int airoha_ppe_get_smac_id(struct airoha_eth *eth,
++				  struct airoha_gdm_port *port,
++				  const u8 *addr)
+ {
+-	if (ether_addr_equal(dev->port->smac, addr))
+-		return;
++	int i, free = -1;
++
++	if (ether_addr_equal(port->smac, addr))
++		return port->id;
++
++	spin_lock_bh(&eth->updmem_lock);
++
++	for (i = AIROHA_UPDMEM_DYN_FIRST; i <= AIROHA_UPDMEM_DYN_LAST; i++) {
++		if (!(eth->updmem_used & BIT(i))) {
++			if (free < 0)
++				free = i;
++			continue;
++		}
++		if (ether_addr_equal(eth->updmem_mac[i], addr)) {
++			spin_unlock_bh(&eth->updmem_lock);
++			return i;
++		}
++	}
++
++	if (free < 0) {
++		spin_unlock_bh(&eth->updmem_lock);
++		dev_warn_ratelimited(eth->dev,
++				     "no free UPDMEM slot for source MAC %pM, IPv6 flow stays in software\n",
++				     addr);
++		return -ENOSPC;
++	}
++
++	airoha_ppe_write_upd_mem(eth, free, addr);
++	spin_unlock_bh(&eth->updmem_lock);
++
++	dev_info(eth->dev, "UPDMEM slot %d allocated for source MAC %pM\n",
++		 free, addr);
+ 
+-	airoha_ppe_init_upd_mem(dev, addr);
++	return free;
+ }
+ 
+ static int airoha_ppe_foe_entry_prepare(struct airoha_eth *eth,
+@@ -431,9 +474,15 @@
+ 						  dsa_port);
+ 
+ 			smac_id = port->id;
+-			if (type >= PPE_PKT_TYPE_IPV6_ROUTE_3T)
+-				airoha_ppe_sync_upd_mem(dev,
+-							data->eth.h_source);
++			if (type >= PPE_PKT_TYPE_IPV6_ROUTE_3T) {
++				int sid;
++
++				sid = airoha_ppe_get_smac_id(eth, port,
++							     data->eth.h_source);
++				if (sid < 0)
++					return -EOPNOTSUPP;
++				smac_id = sid;
++			}
+ 		}
+ 	}
+ 
+@@ -1545,26 +1594,39 @@
+ 	airoha_ppe_foe_insert_entry(ppe, skb, hash, rx_wlan);
+ }
+ 
+-void airoha_ppe_init_upd_mem(struct airoha_gdm_dev *dev, const u8 *addr)
++static void airoha_ppe_write_upd_mem(struct airoha_eth *eth, u8 slot,
++				     const u8 *addr)
+ {
+-	struct airoha_gdm_port *port = dev->port;
+-	struct airoha_eth *eth = dev->eth;
+ 	u32 val;
+ 
++	lockdep_assert_held(&eth->updmem_lock);
++
+ 	val = (addr[2] << 24) | (addr[3] << 16) | (addr[4] << 8) | addr[5];
+ 	airoha_fe_wr(eth, REG_UPDMEM_DATA(0), val);
+ 	airoha_fe_wr(eth, REG_UPDMEM_CTRL(0),
+-		     FIELD_PREP(PPE_UPDMEM_ADDR_MASK, port->id) |
++		     FIELD_PREP(PPE_UPDMEM_ADDR_MASK, slot) |
+ 		     PPE_UPDMEM_WR_MASK | PPE_UPDMEM_REQ_MASK);
+ 
+ 	val = (addr[0] << 8) | addr[1];
+ 	airoha_fe_wr(eth, REG_UPDMEM_DATA(0), val);
+ 	airoha_fe_wr(eth, REG_UPDMEM_CTRL(0),
+-		     FIELD_PREP(PPE_UPDMEM_ADDR_MASK, port->id) |
++		     FIELD_PREP(PPE_UPDMEM_ADDR_MASK, slot) |
+ 		     FIELD_PREP(PPE_UPDMEM_OFFSET_MASK, 1) |
+ 		     PPE_UPDMEM_WR_MASK | PPE_UPDMEM_REQ_MASK);
+ 
++	ether_addr_copy(eth->updmem_mac[slot], addr);
++	eth->updmem_used |= BIT(slot);
++}
++
++void airoha_ppe_init_upd_mem(struct airoha_gdm_dev *dev, const u8 *addr)
++{
++	struct airoha_gdm_port *port = dev->port;
++	struct airoha_eth *eth = dev->eth;
++
++	spin_lock_bh(&eth->updmem_lock);
++	airoha_ppe_write_upd_mem(eth, port->id, addr);
+ 	ether_addr_copy(port->smac, addr);
++	spin_unlock_bh(&eth->updmem_lock);
+ }
+ 
+ struct airoha_ppe_dev *airoha_ppe_get_dev(struct device *dev)
+@@ -1693,6 +1755,8 @@
+ 	if (err)
+ 		return err;
+ 
++	spin_lock_init(&eth->updmem_lock);
++
+ 	err = rhashtable_init(&eth->flow_table, &airoha_flow_table_params);
+ 	if (err)
+ 		return err;
