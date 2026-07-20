@@ -713,18 +713,28 @@ ${d}" ;;
 	tx1_mbps=$(printf '%s\n' "$_txv" | awk '{print $2}')
 	tx2_mbps=$(printf '%s\n' "$_txv" | awk '{print $3}')
 
+	# Per-band Tx PER (packet error rate) from mt76 debugfs — the consistent
+	# per-MPDU hardware error metric. Surfaced below as retry_pct because the
+	# station-dump ratio (per-MPDU tx_retries vs per-MSDU tx_packets) over-reads
+	# 2-5x on EHT/6 GHz and isn't a real health signal.
+	local band_per_0=0 band_per_1=0 band_per_2=0
+	eval "$(awk '
+		/Phy band [0-9]/ { b = $NF + 0 }
+		/Tx PER:/ { v = $3; gsub(/%/, "", v); if (b >= 0 && b <= 2) printf "band_per_%d=%d;", b, v + 0 }
+	' /sys/kernel/debug/ieee80211/phy0/mt76/tx_stats 2>/dev/null)"
+
 	local bands_json=""
 	for band_idx in 0 1 2; do
-		local dump tx_mbps
+		local dump tx_mbps band_per
 		case "$band_idx" in
-			0) dump="$dump0"; tx_mbps="$tx0_mbps" ;;
-			1) dump="$dump1"; tx_mbps="$tx1_mbps" ;;
-			2) dump="$dump2"; tx_mbps="$tx2_mbps" ;;
+			0) dump="$dump0"; tx_mbps="$tx0_mbps"; band_per="$band_per_0" ;;
+			1) dump="$dump1"; tx_mbps="$tx1_mbps"; band_per="$band_per_1" ;;
+			2) dump="$dump2"; tx_mbps="$tx2_mbps"; band_per="$band_per_2" ;;
 		esac
 		[ -z "$dump" ] && continue
 
 		local stats
-		stats=$(echo "$dump" | awk '
+		stats=$(echo "$dump" | awk -v band_per="${band_per:-0}" '
 		BEGIN {
 			stations=0; tx_pkts=0; tx_retries=0; tx_failed=0
 			sum_phy=0; sum_exp=0; phy_count=0; exp_count=0
@@ -754,7 +764,10 @@ ${d}" ;;
 			avg_phy = (phy_count > 0) ? sum_phy/phy_count : 0
 			avg_exp = (exp_count > 0) ? sum_exp/exp_count : 0
 			efficiency = (avg_phy > 0) ? int(avg_exp / avg_phy * 100) : 0
-			retry_pct = ((tx_pkts + tx_retries) > 0) ? int(tx_retries / (tx_pkts + tx_retries) * 100) : 0
+			# Real per-MPDU Tx PER from mt76 debugfs (passed in) as retry/error %;
+			# raw tx_retries/tx_packets still emitted below but their ratio
+			# over-reads on EHT (per-MPDU vs per-MSDU) so it is not used for health.
+			retry_pct = band_per + 0
 			avg_sig = (sig_count > 0) ? int(sum_sig / sig_count) : 0
 			printf "%d %d %d %d %.1f %.1f %d %d %d %d", \
 				stations, tx_pkts, tx_retries, tx_failed, avg_phy, avg_exp, efficiency, retry_pct, avg_sig, min_sig

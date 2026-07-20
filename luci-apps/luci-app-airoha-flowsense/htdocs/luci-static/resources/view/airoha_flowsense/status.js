@@ -179,13 +179,14 @@ function getTxQueue(ti, b) {
 function bandHealth(s) {
 	if (!s || s.count===0) return { text:'No clients', color:'#888' };
 	if (!s.tx_packets) return { text:'Idle', color:'#888' };
-	var r = s.tx_retries/(s.tx_packets+s.tx_retries);
+	var r = (s.retry_pct || 0) / 100;
 	return r>0.5 ? {text:'Poor',color:'#f44336'} : r>0.2 ? {text:'Fair',color:'#ff9800'} : {text:'Good',color:'#4caf50'};
 }
 
 function retryPct(s) {
 	if (!s || !s.tx_packets) return '-';
-	return (s.tx_retries/(s.tx_packets+s.tx_retries)*100).toFixed(1)+'%';
+	// retry_pct now carries the real per-band Tx PER (per-MPDU hardware metric).
+	return (s.retry_pct || 0) + '%';
 }
 
 function getTxStatsBand(txs, band) {

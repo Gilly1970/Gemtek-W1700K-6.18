@@ -1,2 +1,2 @@
-config jitter
+config jitter 'jitter'
 	option target '1.1.1.1'
