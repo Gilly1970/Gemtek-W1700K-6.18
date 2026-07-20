@@ -13,7 +13,10 @@ ping_values=""
 count=0
 
 while true; do
-	# Single ping, 1 second timeout
+	# Single ping, 1 second timeout.
+	# NB: on busybox ping the summary splits by '/' so $5 is the MAX rtt -
+	# identical to avg only because -c 1 sends a single probe. If the probe
+	# count ever changes, this field must be revisited.
 	rtt=$(ping -c 1 -W 1 "$TARGET" 2>/dev/null | awk -F'/' '/min.*avg/{printf "%.2f", $5}')
 
 	if [ -n "$rtt" ]; then
@@ -42,11 +45,12 @@ while true; do
 				jitter, last, c, "'"$TARGET"'"
 		}')
 
-		echo "$result" > "$RESULT_FILE"
+		# Write atomically so a reader never sees a half-written file
+		echo "$result" > "$RESULT_FILE.tmp" && mv "$RESULT_FILE.tmp" "$RESULT_FILE"
 	else
 		# Unreachable — preserve sample count but mark unreachable
 		printf '{"jitter":0,"last_ping":0,"samples":%d,"target":"%s","reachable":false,"available":true}\n' \
-			"$count" "$TARGET" > "$RESULT_FILE"
+			"$count" "$TARGET" > "$RESULT_FILE.tmp" && mv "$RESULT_FILE.tmp" "$RESULT_FILE"
 	fi
 
 	sleep "$INTERVAL"

@@ -156,7 +156,7 @@ old form as `npu-monitor.@jitter[0].target`.
 
 ## Package Info
 
-- **Version**: 1.1.3-2
+- **Version**: 1.1.4-3
 - **License**: Apache-2.0
 - **Target**: `airoha` only (`@TARGET_airoha`)
 - **LuCI dependency**: `luci-base`

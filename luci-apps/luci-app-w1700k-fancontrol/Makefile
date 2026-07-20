@@ -10,4 +10,8 @@ LUCI_DEPENDS:=+luci-base @TARGET_airoha
 
 include ../../luci.mk
 
+define Package/luci-app-w1700k-fancontrol/conffiles
+/etc/config/fan
+endef
+
 # call BuildPackage - OpenWrt buildroot signature

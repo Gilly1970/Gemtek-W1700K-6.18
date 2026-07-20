@@ -31,10 +31,14 @@ start_service() {
 }
 
 stop_service() {
-	rm -f /tmp/npu-jitter.json
+	rm -f /tmp/npu-jitter.json /tmp/npu-jitter.json.tmp
 }
 
 reload_service() {
 	stop
 	start
+}
+
+service_triggers() {
+	procd_add_reload_trigger "npu-monitor"
 }

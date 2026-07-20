@@ -2,8 +2,8 @@
 
 include $(TOPDIR)/rules.mk
 
-PKG_VERSION:=1.1.3
-PKG_RELEASE:=2
+PKG_VERSION:=1.1.4
+PKG_RELEASE:=3
 PKG_LICENSE:=Apache-2.0
 
 LUCI_TITLE:=LuCI Airoha FlowSense — Offload & PPE Monitor
