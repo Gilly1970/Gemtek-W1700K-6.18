@@ -1,0 +1,345 @@
+From: Gilly1970 <gilroyscott@hotmail.com>
+Subject: [PATCH v3] net: airoha: allocate UPDMEM slots per IPv6 egress source MAC
+
+The driver used one fixed UPDMEM source-MAC slot per GDM port, so flows with 
+different source MACs on the same port (VLAN uppers, bridged clients) overwrote
+each other and egressed with the wrong MAC. Replace this with a refcounted, 
+LRU-cached slot pool allocated per distinct egress MAC, declining the offload 
+with -EOPNOTSUPP when the pool is exhausted so flows fall back to the correct 
+software path. UPDMEM writes are now spinlock-protected, closing the race between 
+flow setup and ndo_set_mac_address.
+
+---
+ drivers/net/ethernet/airoha/airoha_eth.h |  11 ++
+ drivers/net/ethernet/airoha/airoha_ppe.c | 196 ++++++++++++++++++++---
+ 2 files changed, 182 insertions(+), 25 deletions(-)
+
+diff --git a/drivers/net/ethernet/airoha/airoha_eth.h b/drivers/net/ethernet/airoha/airoha_eth.h
+index 4c67083..c164a8d 100644
+--- a/drivers/net/ethernet/airoha/airoha_eth.h
++++ b/drivers/net/ethernet/airoha/airoha_eth.h
+@@ -668,8 +668,19 @@ struct airoha_eth {
+ 
+ 	struct airoha_qdma qdma[AIROHA_MAX_NUM_QDMA];
+ 	struct airoha_gdm_port *ports[AIROHA_MAX_NUM_GDM_PORTS];
++
++	spinlock_t updmem_lock;
++	u16 updmem_used;
++	u8 updmem_mac[16][ETH_ALEN];
++	u32 updmem_refcnt[16];
++	u32 updmem_stamp[16];
++	u32 updmem_seq;
+ };
+ 
++#define AIROHA_UPDMEM_DYN_FIRST		(AIROHA_MAX_NUM_GDM_PORTS + 1)
++#define AIROHA_UPDMEM_DYN_LAST		14
++#define AIROHA_UPDMEM_SMAC_ID_KEEP	0xf
++
+ u32 airoha_rr(void __iomem *base, u32 offset);
+ void airoha_wr(void __iomem *base, u32 offset, u32 val);
+ u32 airoha_rmw(void __iomem *base, u32 offset, u32 mask, u32 val);
+diff --git a/drivers/net/ethernet/airoha/airoha_ppe.c b/drivers/net/ethernet/airoha/airoha_ppe.c
+index 6c6cc6e..abc5a72 100644
+--- a/drivers/net/ethernet/airoha/airoha_ppe.c
++++ b/drivers/net/ethernet/airoha/airoha_ppe.c
+@@ -339,12 +339,123 @@ static void airoha_ppe_foe_set_bridge_addrs(struct airoha_foe_bridge *br,
+ 	br->src_mac_lo = get_unaligned_be32(eh->h_source + 2);
+ }
+ 
+-static void airoha_ppe_sync_upd_mem(struct airoha_gdm_dev *dev, const u8 *addr)
++static void airoha_ppe_write_upd_mem(struct airoha_eth *eth, u8 slot,
++				     const u8 *addr);
++
++static bool airoha_ppe_updmem_slot_poolable(struct airoha_eth *eth, int slot)
++{
++	int i;
++
++	if (slot >= AIROHA_UPDMEM_SMAC_ID_KEEP)
++		return false;
++
++	for (i = 0; i < ARRAY_SIZE(eth->ports); i++) {
++		struct airoha_gdm_port *port = eth->ports[i];
++
++		if (port && port->id == slot)
++			return false;
++	}
++
++	return true;
++}
++
++static int airoha_ppe_get_smac_id(struct airoha_eth *eth,
++				  struct airoha_gdm_port *port,
++				  const u8 *addr)
++{
++	/* Historic dynamic range first; slots below it (only poolable when
++	 * the board does not register the matching GDM port) are dipped
++	 * into last, slot 0 at the very end.
++	 */
++	static const u8 scan_order[] = {
++		5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 4, 3, 2, 1, 0
++	};
++	int i, k, slot, free = -1, evict = -1;
++
++	if (ether_addr_equal(port->smac, addr))
++		return port->id;
++
++	spin_lock_bh(&eth->updmem_lock);
++
++	for (k = 0; k < ARRAY_SIZE(scan_order); k++) {
++		i = scan_order[k];
++
++		if (!airoha_ppe_updmem_slot_poolable(eth, i))
++			continue;
++
++		if (!(eth->updmem_used & BIT(i))) {
++			if (free < 0)
++				free = i;
++			continue;
++		}
++
++		if (ether_addr_equal(eth->updmem_mac[i], addr)) {
++			/* Live or cached: the MAC is already programmed,
++			 * just take a reference.
++			 */
++			eth->updmem_refcnt[i]++;
++			spin_unlock_bh(&eth->updmem_lock);
++			return i;
++		}
++
++		if (!eth->updmem_refcnt[i] &&
++		    (evict < 0 ||
++		     (s32)(eth->updmem_stamp[i] -
++			   eth->updmem_stamp[evict]) < 0))
++			evict = i;
++	}
++
++	if (free >= 0) {
++		slot = free;
++	} else if (evict >= 0) {
++		slot = evict;
++		dev_info(eth->dev,
++			 "UPDMEM slot %d reassigned to source MAC %pM (was %pM)\n",
++			 slot, addr, eth->updmem_mac[slot]);
++	} else {
++		spin_unlock_bh(&eth->updmem_lock);
++		dev_warn_ratelimited(eth->dev,
++				     "no free UPDMEM slot for source MAC %pM, IPv6 flow stays in software\n",
++				     addr);
++		return -ENOSPC;
++	}
++
++	airoha_ppe_write_upd_mem(eth, slot, addr);
++	eth->updmem_refcnt[slot] = 1;
++	spin_unlock_bh(&eth->updmem_lock);
++
++	if (free >= 0)
++		dev_info(eth->dev,
++			 "UPDMEM slot %d allocated for source MAC %pM\n",
++			 slot, addr);
++
++	return slot;
++}
++
++static void airoha_ppe_put_smac_id(struct airoha_eth *eth, u8 smac_id)
++{
++	if (!airoha_ppe_updmem_slot_poolable(eth, smac_id))
++		return;
++
++	spin_lock_bh(&eth->updmem_lock);
++
++	if ((eth->updmem_used & BIT(smac_id)) && eth->updmem_refcnt[smac_id] &&
++	    --eth->updmem_refcnt[smac_id] == 0)
++		eth->updmem_stamp[smac_id] = ++eth->updmem_seq;
++
++	spin_unlock_bh(&eth->updmem_lock);
++}
++
++static void airoha_ppe_foe_entry_put_smac_id(struct airoha_eth *eth,
++					     struct airoha_foe_entry *hwe)
+ {
+-	if (ether_addr_equal(dev->port->smac, addr))
++	int type = FIELD_GET(AIROHA_FOE_IB1_BIND_PACKET_TYPE, hwe->ib1);
++
++	if (type < PPE_PKT_TYPE_IPV6_ROUTE_3T)
+ 		return;
+ 
+-	airoha_ppe_init_upd_mem(dev, addr);
++	airoha_ppe_put_smac_id(eth, FIELD_GET(AIROHA_FOE_MAC_SMAC_ID,
++					      hwe->ipv6.l2.src_mac_hi));
+ }
+ 
+ static int airoha_ppe_foe_entry_prepare(struct airoha_eth *eth,
+@@ -424,9 +535,15 @@ static int airoha_ppe_foe_entry_prepare(struct airoha_eth *eth,
+ 						  dsa_port);
+ 
+ 			smac_id = port->id;
+-			if (type >= PPE_PKT_TYPE_IPV6_ROUTE_3T)
+-				airoha_ppe_sync_upd_mem(dev,
+-							data->eth.h_source);
++			if (type >= PPE_PKT_TYPE_IPV6_ROUTE_3T) {
++				int sid;
++
++				sid = airoha_ppe_get_smac_id(eth, port,
++							     data->eth.h_source);
++				if (sid < 0)
++					return -EOPNOTSUPP;
++				smac_id = sid;
++			}
+ 		}
+ 	}
+ 
+@@ -861,6 +978,8 @@ static void airoha_ppe_foe_flow_remove_entry(struct airoha_ppe *ppe,
+ 		airoha_ppe_foe_remove_flow(ppe, e);
+ 
+ 	spin_unlock_bh(&ppe_lock);
++
++	airoha_ppe_foe_entry_put_smac_id(ppe->eth, &e->data);
+ }
+ 
+ static int
+@@ -1218,14 +1337,17 @@ static int airoha_ppe_flow_offload_replace(struct airoha_eth *eth,
+ 	if (flow_rule_match_key(rule, FLOW_DISSECTOR_KEY_PORTS)) {
+ 		struct flow_match_ports ports;
+ 
+-		if (offload_type == PPE_PKT_TYPE_BRIDGE)
+-			return -EOPNOTSUPP;
++		if (offload_type == PPE_PKT_TYPE_BRIDGE) {
++			err = -EOPNOTSUPP;
++			goto put_smac;
++		}
+ 
+ 		flow_rule_match_ports(rule, &ports);
+ 		data.src_port = ports.key->src;
+ 		data.dst_port = ports.key->dst;
+ 	} else if (offload_type != PPE_PKT_TYPE_BRIDGE) {
+-		return -EOPNOTSUPP;
++		err = -EOPNOTSUPP;
++		goto put_smac;
+ 	}
+ 
+ 	if (addr_type == FLOW_DISSECTOR_KEY_IPV4_ADDRS) {
+@@ -1251,8 +1373,10 @@ static int airoha_ppe_flow_offload_replace(struct airoha_eth *eth,
+ 		if (act->id != FLOW_ACTION_MANGLE)
+ 			continue;
+ 
+-		if (offload_type == PPE_PKT_TYPE_BRIDGE)
+-			return -EOPNOTSUPP;
++		if (offload_type == PPE_PKT_TYPE_BRIDGE) {
++			err = -EOPNOTSUPP;
++			goto put_smac;
++		}
+ 
+ 		switch (act->mangle.htype) {
+ 		case FLOW_ACT_MANGLE_HDR_TYPE_TCP:
+@@ -1266,22 +1390,25 @@ static int airoha_ppe_flow_offload_replace(struct airoha_eth *eth,
+ 			/* handled earlier */
+ 			break;
+ 		default:
+-			return -EOPNOTSUPP;
++			err = -EOPNOTSUPP;
++			goto put_smac;
+ 		}
+ 
+ 		if (err)
+-			return err;
++			goto put_smac;
+ 	}
+ 
+ 	if (addr_type == FLOW_DISSECTOR_KEY_IPV4_ADDRS) {
+ 		err = airoha_ppe_foe_entry_set_ipv4_tuple(&hwe, &data, true);
+ 		if (err)
+-			return err;
++			goto put_smac;
+ 	}
+ 
+ 	e = kzalloc(sizeof(*e), GFP_KERNEL);
+-	if (!e)
+-		return -ENOMEM;
++	if (!e) {
++		err = -ENOMEM;
++		goto put_smac;
++	}
+ 
+ 	e->cookie = f->cookie;
+ 	memcpy(&e->data, &hwe, sizeof(e->data));
+@@ -1292,15 +1419,19 @@ static int airoha_ppe_flow_offload_replace(struct airoha_eth *eth,
+ 
+ 	err = rhashtable_insert_fast(&eth->flow_table, &e->node,
+ 				     airoha_flow_table_params);
+-	if (err < 0)
+-		goto remove_foe_entry;
++	if (err < 0) {
++		/* drops the smac_id reference as well */
++		airoha_ppe_foe_flow_remove_entry(eth->ppe, e);
++		kfree(e);
++		return err;
++	}
+ 
+ 	return 0;
+ 
+-remove_foe_entry:
+-	airoha_ppe_foe_flow_remove_entry(eth->ppe, e);
+ free_entry:
+ 	kfree(e);
++put_smac:
++	airoha_ppe_foe_entry_put_smac_id(eth, &hwe);
+ 
+ 	return err;
+ }
+@@ -1538,26 +1669,39 @@ void airoha_ppe_check_skb(struct airoha_ppe_dev *dev, struct sk_buff *skb,
+ 	airoha_ppe_foe_insert_entry(ppe, skb, hash, rx_wlan);
+ }
+ 
+-void airoha_ppe_init_upd_mem(struct airoha_gdm_dev *dev, const u8 *addr)
++static void airoha_ppe_write_upd_mem(struct airoha_eth *eth, u8 slot,
++				     const u8 *addr)
+ {
+-	struct airoha_gdm_port *port = dev->port;
+-	struct airoha_eth *eth = dev->eth;
+ 	u32 val;
+ 
++	lockdep_assert_held(&eth->updmem_lock);
++
+ 	val = (addr[2] << 24) | (addr[3] << 16) | (addr[4] << 8) | addr[5];
+ 	airoha_fe_wr(eth, REG_UPDMEM_DATA(0), val);
+ 	airoha_fe_wr(eth, REG_UPDMEM_CTRL(0),
+-		     FIELD_PREP(PPE_UPDMEM_ADDR_MASK, port->id) |
++		     FIELD_PREP(PPE_UPDMEM_ADDR_MASK, slot) |
+ 		     PPE_UPDMEM_WR_MASK | PPE_UPDMEM_REQ_MASK);
+ 
+ 	val = (addr[0] << 8) | addr[1];
+ 	airoha_fe_wr(eth, REG_UPDMEM_DATA(0), val);
+ 	airoha_fe_wr(eth, REG_UPDMEM_CTRL(0),
+-		     FIELD_PREP(PPE_UPDMEM_ADDR_MASK, port->id) |
++		     FIELD_PREP(PPE_UPDMEM_ADDR_MASK, slot) |
+ 		     FIELD_PREP(PPE_UPDMEM_OFFSET_MASK, 1) |
+ 		     PPE_UPDMEM_WR_MASK | PPE_UPDMEM_REQ_MASK);
+ 
++	ether_addr_copy(eth->updmem_mac[slot], addr);
++	eth->updmem_used |= BIT(slot);
++}
++
++void airoha_ppe_init_upd_mem(struct airoha_gdm_dev *dev, const u8 *addr)
++{
++	struct airoha_gdm_port *port = dev->port;
++	struct airoha_eth *eth = dev->eth;
++
++	spin_lock_bh(&eth->updmem_lock);
++	airoha_ppe_write_upd_mem(eth, port->id, addr);
+ 	ether_addr_copy(port->smac, addr);
++	spin_unlock_bh(&eth->updmem_lock);
+ }
+ 
+ struct airoha_ppe_dev *airoha_ppe_get_dev(struct device *dev)
+@@ -1686,6 +1830,8 @@ int airoha_ppe_init(struct airoha_eth *eth)
+ 	if (err)
+ 		return err;
+ 
++	spin_lock_init(&eth->updmem_lock);
++
+ 	err = rhashtable_init(&eth->flow_table, &airoha_flow_table_params);
+ 	if (err)
+ 		return err;
+-- 
+2.43.0
+
