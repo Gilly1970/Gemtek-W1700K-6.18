@@ -107,16 +107,16 @@ function injectCSS() {
 	if (dark === _lastDarkMode) return;
 	_lastDarkMode = dark;
 	var vars = dark
-		? ':root{--soc-card-bg:#1e1e1e;--soc-border:#333;--soc-muted:#999;--soc-text:#e0e0e0;--soc-bar-track:#333}'
-		: ':root{--soc-card-bg:#fff;--soc-border:#d0d0d0;--soc-muted:#666;--soc-text:#222;--soc-bar-track:#e0e0e0}';
+		? ':root{--soc-card-bg:#1e1e1e;--soc-border:#333;--soc-muted:#999;--soc-text:#e0e0e0;--soc-bar-track:#333;--soc-gauge:#fff;--soc-load:#ffe066}'
+		: ':root{--soc-card-bg:#fff;--soc-border:#d0d0d0;--soc-muted:#666;--soc-text:#222;--soc-bar-track:#e0e0e0;--soc-gauge:#222;--soc-load:#b58900}';
 	el.textContent = themeCSS + vars;
 }
 
 /* ── Existing Helpers ── */
 var bandInfo = [
-	{ name: '2.4 GHz', accent: '#FFFFFF', rtyCol: '#EFBF04', maxMbps: 688   },
-	{ name: '5 GHz',   accent: '#FFFFFF', rtyCol: '#305CDE', maxMbps: 5765  },
-	{ name: '6 GHz',   accent: '#FFFFFF', rtyCol: '#2CFF05', maxMbps: 11529 }
+	{ name: '2.4 GHz', accent: 'var(--soc-gauge)', rtyCol: '#EFBF04', maxMbps: 688   },
+	{ name: '5 GHz',   accent: 'var(--soc-gauge)', rtyCol: '#305CDE', maxMbps: 5765  },
+	{ name: '6 GHz',   accent: 'var(--soc-gauge)', rtyCol: '#2CFF05', maxMbps: 11529 }
 ];
 
 
@@ -889,7 +889,7 @@ function buildCpuNpuTacho(cs, ppe, st, ti) {
 	p.push('<circle cx="150" cy="150" r="83" fill="none" stroke="var(--soc-border)" stroke-width="0.5" opacity="0.35"/>');
 
 	// Ring labels at 9 and 3 o'clock
-	p.push('<text x="107" y="153" text-anchor="middle" fill="#ffe066" font-size="7" font-family="monospace" opacity="0.75">◄LOAD</text>');
+	p.push('<text x="107" y="153" text-anchor="middle" fill="var(--soc-load)" font-size="7" font-family="monospace" opacity="0.75">◄LOAD</text>');
 	p.push('<text x="193" y="153" text-anchor="middle" fill="#00cc44" font-size="7" font-family="monospace" opacity="0.75">FREQ►</text>');
 
 	// Tachometer ticks
@@ -912,7 +912,7 @@ function buildCpuNpuTacho(cs, ppe, st, ti) {
 		var litB = i < cpuLit, isEdgeB = litB && i === cpuLit - 1;
 		p.push('<line x1="'+(cx+57*cB).toFixed(1)+'" y1="'+(cy+57*sB).toFixed(1)+
 		       '" x2="'+(cx+67*cB).toFixed(1)+'" y2="'+(cy+67*sB).toFixed(1)+
-		       '" stroke="'+(litB ? '#ffe066' : 'var(--soc-border)')+'"'+
+		       '" stroke="'+(litB ? 'var(--soc-load)' : 'var(--soc-border)')+'"'+
 		       ' stroke-width="1.5" stroke-linecap="round" opacity="'+(litB?'0.9':'0.22')+'"'+
 		       (isEdgeB?' filter="url(#f-cn-npu)"':'')+' />');
 	}
@@ -920,8 +920,8 @@ function buildCpuNpuTacho(cs, ppe, st, ti) {
 	// Centre readout
 	if (governor) p.push('<text x="150" y="118" text-anchor="middle" fill="var(--soc-text)" font-size="7" font-family="monospace" letter-spacing="1">'+governor+'</text>');
 	if (freqMhz)  p.push('<text x="150" y="130" text-anchor="middle" fill="#00cc44" font-size="9" font-weight="700" font-family="monospace">'+freqMhz+' MHz</text>');
-	p.push('<text x="150" y="148" text-anchor="middle" fill="#ffe066" font-size="22" font-weight="700" font-family="monospace">'+cpuPct+'%</text>');
-	p.push('<text x="150" y="159" text-anchor="middle" fill="#ffe066" font-size="7" font-family="monospace" letter-spacing="2">CPU LOAD</text>');
+	p.push('<text x="150" y="148" text-anchor="middle" fill="var(--soc-load)" font-size="22" font-weight="700" font-family="monospace">'+cpuPct+'%</text>');
+	p.push('<text x="150" y="159" text-anchor="middle" fill="var(--soc-load)" font-size="7" font-family="monospace" letter-spacing="2">CPU LOAD</text>');
 	p.push('<text x="150" y="175" text-anchor="middle" fill="'+npuStatusCol+'" font-size="8" font-family="monospace">'+npuStatus+'</text>');
 	p.push('<text x="150" y="190" text-anchor="middle" fill="'+npuColor+'" font-size="13" font-weight="700" font-family="monospace">'+offloadPct+'%</text>');
 	p.push('<text x="150" y="200" text-anchor="middle" fill="var(--soc-muted)" font-size="7" font-family="monospace" letter-spacing="1.5">OFFLOADED</text>');
@@ -1107,7 +1107,7 @@ function buildWifiBandTacho(bandIdx, ws, qType, bndCount, unbCount) {
 	// NPU/DMA badge (rect + text)
 	var badgeCol = isNpu ? '#1565c0' : '#444';
 	p.push('<rect x="135" y="122" width="30" height="12" rx="2" fill="'+badgeCol+'"/>');
-	p.push('<text x="150" y="131" text-anchor="middle" fill="white" font-size="7" font-weight="600" font-family="monospace">'+(isNpu?'NPU':'DMA')+'</text>');
+	p.push('<text x="150" y="131" text-anchor="middle" fill="var(--soc-gauge)" font-size="7" font-weight="600" font-family="monospace">'+(isNpu?'NPU':'DMA')+'</text>');
 
 	// Main throughput value
 	var mbpsLabel = mbps > 0 ? Math.round(mbps).toString() : (stations > 0 ? '0' : '\u2014');
