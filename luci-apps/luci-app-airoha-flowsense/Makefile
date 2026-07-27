@@ -3,7 +3,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_VERSION:=1.1.5
-PKG_RELEASE:=2
+PKG_RELEASE:=3
 PKG_LICENSE:=Apache-2.0
 
 LUCI_TITLE:=LuCI Airoha FlowSense — Offload & PPE Monitor
@@ -17,13 +17,23 @@ endef
 
 define Package/luci-app-airoha-flowsense/postinst
 #!/bin/sh
-[ -x /etc/init.d/npu-jitter ] && /etc/init.d/npu-jitter restart
+# Enforce +x on our scripts: source-tree perms have drifted to 0644 before
+# (build workflow chmod missed / editor or sync resetting the mode), which
+# ships a non-exec init script + rpcd backend -> "Permission denied" on the
+# post-upgrade enable and an RPCError on the page. Self-heal here so the app
+# works regardless of how the apk was packed. Runs offline (IPKG_INSTROOT
+# set) and online.
+chmod 0755 "$${IPKG_INSTROOT}/etc/init.d/npu-jitter" \
+           "$${IPKG_INSTROOT}/usr/libexec/npu-jitter-daemon" \
+           "$${IPKG_INSTROOT}/usr/libexec/rpcd/luci.airoha_flowsense" 2>/dev/null
 [ -n "$${IPKG_INSTROOT}" ] || {
+	/etc/init.d/npu-jitter enable 2>/dev/null
+	/etc/init.d/npu-jitter restart 2>/dev/null
 	rm -f /tmp/luci-indexcache.*
 	rm -rf /tmp/luci-modulecache/
 	/etc/init.d/rpcd reload 2>/dev/null
-	exit 0
 }
+exit 0
 endef
 
 # call BuildPackage - OpenWrt buildroot signature
