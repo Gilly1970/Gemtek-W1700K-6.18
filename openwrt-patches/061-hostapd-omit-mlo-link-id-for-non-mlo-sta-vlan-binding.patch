@@ -1,0 +1,35 @@
+From: Jihong Min <hurryman2212@gmail.com>
+Date: Sat, 25 Jul 2026 13:54:23 +0900
+Subject: [PATCH] hostapd: omit MLO link ID for non-MLO STA VLAN binding
+
+When a non-MLO station associates with an AP MLD, hostapd currently passes
+the AP link ID to NL80211_CMD_SET_STATION solely because the AP is an MLD.
+mac80211 rejects the VLAN binding with -EINVAL when the station has no
+corresponding MLO link, which prevents the four-way handshake from
+completing.
+
+Follow the set_sta_vlan driver contract and pass a link ID only for an MLD
+station.  Keep using the first AP MLD BSS to manage the shared VLAN list
+for both MLO and non-MLO stations.
+
+Assisted-by: Codex:gpt-5.6
+Signed-off-by: Jihong Min <hurryman2212@gmail.com>
+---
+ src/ap/sta_info.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/src/ap/sta_info.c b/src/ap/sta_info.c
+--- a/src/ap/sta_info.c
++++ b/src/ap/sta_info.c
+@@ -1471,7 +1471,8 @@ static int ap_sta_bind_vlan_helper(struct hostapd_data *hapd,
+ 
+ #ifdef CONFIG_IEEE80211BE
+ 	if (hapd->conf->mld_ap) {
+-		mld_link_id = hapd->mld_link_id;
++		if (ap_sta_is_mld(hapd, sta))
++			mld_link_id = hapd->mld_link_id;
+ 		vlan_bss = hostapd_mld_get_first_bss(hapd);
+ 		if (!vlan_bss)
+ 			vlan_bss = hapd;
+-- 
+2.53.0

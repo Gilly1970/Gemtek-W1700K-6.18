@@ -137,5 +137,6 @@ target/linux/generic/backport-6.18/802-v7.1-net-dsa-mt7530-fix-CPU-port-VLAN-not
 
 ### VLAN-aware bridge frames reach the CPU carrying a spurious PVID tag (upstream 4cb3cd670b2a)
 target/linux/generic/backport-6.18/803-v7.1-net-dsa-mt7530-untag-VLAN-aware-bridge-PVID.patch
+package/network/services/hostapd/patches/061-hostapd-omit-mlo-link-id-for-non-mlo-sta-vlan-binding.patch
 
 
