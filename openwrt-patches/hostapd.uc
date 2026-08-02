@@ -139,13 +139,6 @@ function device_cell_density_append(config) {
 	}
 }
 
-function device_rates(config) {
-	for (let key in [ 'supported_rates', 'basic_rates' ])
-		config[key] = map(config[key], x => x / 100);
-
-	append_vars(config, [ 'beacon_rate', 'supported_rates', 'basic_rates' ]);
-}
-
 function device_htmode_append(config) {
 	config.channel_offset = config.band == '6g' ? 1 : 0;
 
@@ -321,7 +314,7 @@ function device_htmode_append(config) {
 		set_default(config, 'tx_queue_data2_burst', '2.0');
 
 		let vht_capab = phy_capabilities.vht_capa;
-		
+
 		config.vht_capab = '';
 		if (vht_capab & 0x10 && config.rxldpc)
 			config.vht_capab += '[RXLDPC]';
@@ -455,8 +448,8 @@ function device_htmode_append(config) {
 		config.ieee80211be = true;
 
 		/* W1700K: force-enable EHT beamforming (MT7996 supports SU+MU eBF).
-		 * Default them on, then let the capability gates below switch any
-		 * off if the hardware does not advertise support. */
+		   Default them on, then let the capability gates below switch any
+		   off if the hardware does not advertise support. */
 		config.eht_su_beamformer ??= 1;
 		config.eht_su_beamformee ??= 1;
 		config.eht_mu_beamformer ??= 1;
@@ -481,7 +474,7 @@ function device_htmode_append(config) {
 }
 
 function device_extended_features(data, flag) {
-	return !!(data[flag / 8] | (1 << (flag % 8)));
+	return !!(data[flag / 8] & (1 << (flag % 8)));
 }
 
 function device_capabilities(config) {
@@ -523,8 +516,6 @@ function generate(config) {
 	device_country_code(config);
 
 	device_cell_density_append(config);
-
-	device_rates(config);
 
 	/* beacon */
 	append_vars(config, [ 'beacon_int', 'beacon_rate', 'rnr_beacon' ]);
@@ -596,6 +587,10 @@ export function setup(data) {
 		append('\n#num_global_macaddr', data.config.num_global_macaddr);
 	if (data.config.macaddr_base)
 		append('\n#macaddr_base', data.config.macaddr_base);
+	if (data.config.frequency)
+		append('\n#frequency', data.config.frequency);
+	if (data.channel_follow)
+		append('\n#channel_follow', 1);
 
 	let has_ap;
 	for (let k, interface in data.interfaces) {

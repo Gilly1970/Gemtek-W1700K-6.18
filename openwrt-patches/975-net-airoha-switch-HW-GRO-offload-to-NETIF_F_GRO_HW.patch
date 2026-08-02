@@ -1,0 +1,69 @@
+From: Gilly1970 <gilroyscott@hotmail.com>
+Date: Fri, 1 Aug 2026 00:00:00 +0000
+Subject: [PATCH] net: airoha: switch HW GRO offload to NETIF_F_GRO_HW
+
+Finish the migration of the airoha HW GRO/LRO offload (in-tree 916-02 
+plus 920-1x rework. Equivalent to Lorenzo's v3 "add HW GRO offload support".
+
+---
+--- a/drivers/net/ethernet/airoha/airoha_eth.h
++++ b/drivers/net/ethernet/airoha/airoha_eth.h
+@@ -47,7 +47,7 @@
+ 
+ #define AIROHA_LRO_PAGE_ORDER		order_base_2(SZ_16K / PAGE_SIZE)
+ #define AIROHA_MAX_NUM_LRO_QUEUES	8
+-#define AIROHA_RXQ_LRO_EN_MASK		GENMASK(7, 0)
++#define AIROHA_RXQ_LRO_EN_MASK		GENMASK(31, 24)
+ #define AIROHA_RXQ_LRO_MAX_AGG_COUNT	64
+ #define AIROHA_RXQ_LRO_MAX_AGG_TIME	100
+ #define AIROHA_RXQ_LRO_MAX_AGE_TIME	2000
+--- a/drivers/net/ethernet/airoha/airoha_eth.c
++++ b/drivers/net/ethernet/airoha/airoha_eth.c
+@@ -797,7 +797,7 @@
+ 		return NULL;
+ 
+ 	data_off = th_off + (th->doff << 2);
+-	if (len < data_off)
++	if (len <= data_off)
+ 		return NULL;
+ 
+ 	tcp_win = FIELD_GET(QDMA_ETH_RXMSG_TCP_WIN_MASK, msg3);
+@@ -2142,14 +2142,16 @@
+ 	u32 pse_port = FE_PSE_PORT_PPE1;
+ 	int err, qdma_id;
+ 
+-	/* HW LRO is configured on the QDMA and it is shared between
++	/* HW GRO is configured on the QDMA and it is shared between
+ 	 * all the devices using it. Refuse to open a second device on
+-	 * the same QDMA if LRO is enabled on any device sharing it.
++	 * the same QDMA if HW GRO is enabled on any device sharing it
++	 * or if this device has HW GRO enabled in its feature set.
+ 	 */
+ 	qdma = airoha_qdma_deref(dev);
+ 	qdma_id = qdma - &eth->qdma[0];
+ 
+-	if (qdma->users && airoha_fe_lro_is_enabled(eth, qdma_id)) {
++	if (qdma->users && (airoha_fe_lro_is_enabled(eth, qdma_id) ||
++			    (netdev->features & NETIF_F_GRO_HW))) {
+ 		netdev_warn(netdev, "required to disable HW GRO on QDMA%d\n",
+ 			    qdma_id);
+ 		return -EBUSY;
+@@ -2563,6 +2565,9 @@
+ 	if (!(diff & NETIF_F_GRO_HW))
+ 		return 0;
+ 
++	if (!netif_running(netdev))
++		return 0;
++
+ 	if (features & NETIF_F_GRO_HW)
+ 		airoha_dev_lro_enable(dev);
+ 	else
+@@ -3904,7 +3909,7 @@
+ 	netdev->ethtool_ops = &airoha_ethtool_ops;
+ 	netdev->max_mtu = AIROHA_MAX_MTU;
+ 	netdev->watchdog_timeo = 5 * HZ;
+-	netdev->hw_features = AIROHA_HW_FEATURES | NETIF_F_LRO;
++	netdev->hw_features = AIROHA_HW_FEATURES | NETIF_F_GRO_HW;
+ 	netdev->features |= AIROHA_HW_FEATURES;
+ 	netdev->vlan_features = AIROHA_HW_FEATURES;
+ 	SET_NETDEV_DEV(netdev, eth->dev);

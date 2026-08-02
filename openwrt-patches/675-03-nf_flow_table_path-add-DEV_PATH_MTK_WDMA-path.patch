@@ -1,0 +1,28 @@
+From: Gilly1970 <gilroyscott@hotmail.com>
+Subject: [PATCH] netfilter: nf_flow_table_path: handle DEV_PATH_MTK_WDMA
+
+Rebase of the old 675-03 onto kernel 6.18.41: mainline commit 93d7a7ed0734
+moved the flowtable path-discovery machinery out of nft_flow_offload.c into
+net/netfilter/nf_flow_table_path.c. The DEV_PATH_MTK_WDMA case (needed so
+flows egressing to a WiFi/WDMA netdev get a valid source MAC and can be
+HW-offloaded by the airoha PPE) was never mainlined, so re-add it in the
+new file. Without it, WiFi-egress flows fall back to the CPU (PPE bind
+table empty, high CPU, ~half throughput on WiFi downloads).
+
+675-01 (symbol exports) + 675-02 (bridging) are now in mainline; 675-04
+(vlan passthrough) is superseded by mainline's DEV_PATH_BR_VLAN_* handling.
+
+---
+--- a/net/netfilter/nf_flow_table_path.c	2026-08-02 16:22:13.779537237 +1000
++++ b/net/netfilter/nf_flow_table_path.c	2026-08-02 16:22:19.672750332 +1000
+@@ -157,6 +157,10 @@
+ 			}
+ 			info->xmit_type = FLOW_OFFLOAD_XMIT_DIRECT;
+ 			break;
++		case DEV_PATH_MTK_WDMA:
++			if (is_zero_ether_addr(info->h_source))
++				memcpy(info->h_source, path->dev->dev_addr, ETH_ALEN);
++			break;
+ 		default:
+ 			info->indev = NULL;
+ 			break;
