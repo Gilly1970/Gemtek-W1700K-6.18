@@ -13,6 +13,7 @@ DEV="${DEVICENAME:-$INTERFACE}"
 
 case "$DEV" in
 	phy*-ap*) ;;
+	*-mld*) ;;	# MLO/MLD bridge port (ap-mld0 etc.) — not named phyN-apM
 	*) exit 0 ;;
 esac
 
@@ -22,7 +23,8 @@ nft list flowtable inet fw4 ft 2>/dev/null | grep -qw "\"$DEV\"" && exit 0
 # fw4 auto-discovers bridge members on reload. Serialize via flock,
 # WAITING for any in-flight reload rather than skipping: a reload that
 # started before this device existed snapshots the device list without
-# it, so bailing out here leaves the device unoffloaded until the next.
+# it, so bailing out here leaves the device unoffloaded until the next
+# manual reload (symptom: high CPU on downloads, no new BND entries).
 (
 	mkdir -p /var/lock
 	exec 9>/var/lock/flow-offload-wifi.lock

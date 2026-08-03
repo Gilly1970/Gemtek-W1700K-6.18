@@ -83,18 +83,6 @@ package/network/services/hostapd/patches/015-mtk-hostapd-mtk-6G-band-does-not-re
 
 ### wifi: mt76: mt7996: fix capability of EHT-MCS 15 in MRU
 package/kernel/mac80211/patches/subsys/373-wifi-mac80211-fix-missing-ieee80211_eml_params-membe.patch
-package/kernel/mt76/patches/0005-wifi-mt76-mt7996-fix-capability-of-EHT-MCS-15-in-MRU.patch
-
-### wifi: mt76: mt7996: set per-radio MAC address from DT (openwrt#23578)
-004-set-per-radio-MAC-address-from-DT.patch:package/kernel/mt76/patches/004-set-per-radio-MAC-address-from-DT.patch
-
-### Revert mt76 b0af99f "handle UNI PS sync events" — MT_DRV_HW_PS_BUFFERING + PS_SYNC
-015-Revert-wifi-mt76-mt7996-handle-UNI-PS-sync-events.patch:package/kernel/mt76/patches/015-Revert-wifi-mt76-mt7996-handle-UNI-PS-sync-events.patch
-
-### wifi: mt76: hardening for mt76
-016-wifi-mt76-connac-fix-NULL-deref-in-uni_bss_he_tlv.patch:package/kernel/mt76/patches/016-wifi-mt76-connac-fix-NULL-deref-in-uni_bss_he_tlv.patch
-017-wifi-mt76-mt7996-check-get_he_phy_cap-NULL.patch:package/kernel/mt76/patches/017-wifi-mt76-mt7996-check-get_he_phy_cap-NULL.patch
-018-wifi-mt76-mt7996-fix-NULL-deref-in-bfer_eht.patch:package/kernel/mt76/patches/018-wifi-mt76-mt7996-fix-NULL-deref-in-bfer_eht.patch
 
 ### wifi: mt76: mt7996: stop tx_free parse at buffer edge on bad NPU MSDU_CNT.
 019-wifi-mt76-mt7996-guard-tx-free-overrun.patch:package/kernel/mt76/patches/019-wifi-mt76-mt7996-guard-tx-free-overrun.patch
