@@ -26,12 +26,8 @@ mt76-Makefile:package/kernel/mt76/Makefile
 ### fix cpufreq and PM domain drivers for AN7581
 target/linux/airoha/dts/an7581.dtsi
 
-### unblock AIROHA_CPU_PM_DOMAIN
-target/linux/airoha/patches-6.18/041-pmdomain-mediatek-allow-airoha-on-ARCH_AIROHA.patch
-
 ### airoha-cpufreq + pmdomain rewrite for W1700K
 target/linux/generic/pending-6.18/802-OPP-Provide-old-opp-to-config_clks-on-_set_opp.patch
-target/linux/airoha/patches-6.18/999-02-01-cpufreq-airoha-Add-EN7581-CPUFreq-SMCCC-driver.patch
 target/linux/airoha/patches-6.18/999-02-01-pmdomain-airoha-Add-Airoha-CPU-PM-Domain-support.patch
 
 ### make PHY LED pinctrl optional when no pinctrl-0 in DT (silences "Failed to setup PHY LED pinctrl" on W1700K)
