@@ -1,0 +1,29 @@
+From: Daniel Pawlik <pawlik.dan@gmail.com>
+Subject: [PATCH] net: airoha: npu: load the firmware without the sysfs fallback
+
+The NPU firmware is always shipped in the rootfs (airoha/en7581_*_npu_*.bin),
+so the userspace/sysfs firmware-loader fallback in request_firmware() is never
+the right path: it only adds a "Direct firmware load failed ... falling back to
+sysfs" warning and can block on a udev helper before giving up. Use
+request_firmware_direct() so a missing file returns -ENOENT immediately, which
+the existing -ENOENT -> -EPROBE_DEFER handling turns into a clean probe retry
+once the filesystem is up.
+
+### W1700K overlay note: independent of the mailbox patches (924/969) — touches
+### airoha_npu_load_firmware, not send_msg — and applies to the CURRENT 6.18.41
+### base, so it is ENABLED now (not staged for the bump). No struct change, so no
+### mt76 rebuild needed. Validated on-device 2026-08-07 (NPU still 0.1111).
+
+Signed-off-by: Daniel Pawlik <pawlik.dan@gmail.com>
+---
+--- a/drivers/net/ethernet/airoha/airoha_npu.c
++++ b/drivers/net/ethernet/airoha/airoha_npu.c
+@@ -202,7 +202,7 @@ static int airoha_npu_load_firmware(struct device *dev, void __iomem *addr,
+ 	const struct firmware *fw;
+ 	int ret;
+
+-	ret = request_firmware(&fw, fw_name, dev);
++	ret = request_firmware_direct(&fw, fw_name, dev);
+ 	if (ret)
+ 		return ret == -ENOENT ? -EPROBE_DEFER : ret;
+

@@ -1,0 +1,56 @@
+From: mt76 upstream <linux-wireless>
+Subject: [PATCH] wifi: mt76: mt7996: validate sta_num in ALL_STA_INFO event
+
+Validate the firmware-reported station count against the actual received
+event size before iterating, to prevent an out-of-bounds read on a
+malformed or oversized UNI ALL_STA_INFO event. Also null-check skb_pull()
+and verify the event header itself fits in the skb.
+
+W1700K note: pure hardening, no behaviour change on well-formed events.
+Applies to our mt76 pin (b2704cf5); relevant to the per-station
+rate/ADM/MSDU-count path we consume (FlowSense WiFi stats + the tx_free
+MSDU_CNT handling in patch 019). Paths are mt76-source-relative (mt7996/).
+---
+--- a/mt7996/mcu.c
++++ b/mt7996/mcu.c
+@@ -648,13 +648,37 @@ static void
+ mt7996_mcu_rx_all_sta_info_event(struct mt7996_dev *dev, struct sk_buff *skb)
+ {
+ 	struct mt7996_mcu_all_sta_info_event *res;
+-	u16 i;
++	size_t elem_size;
++	u16 i, sta_num;
+
+-	skb_pull(skb, sizeof(struct mt7996_mcu_rxd));
++	if (!skb_pull(skb, sizeof(struct mt7996_mcu_rxd)))
++		return;
++
++	if (skb->len < sizeof(*res))
++		return;
+
+ 	res = (struct mt7996_mcu_all_sta_info_event *)skb->data;
+
+-	for (i = 0; i < le16_to_cpu(res->sta_num); i++) {
++	switch (le16_to_cpu(res->tag)) {
++	case UNI_ALL_STA_TXRX_RATE:
++		elem_size = sizeof(res->rate[0]);
++		break;
++	case UNI_ALL_STA_TXRX_ADM_STAT:
++		elem_size = sizeof(res->adm_stat[0]);
++		break;
++	case UNI_ALL_STA_TXRX_MSDU_COUNT:
++		elem_size = sizeof(res->msdu_cnt[0]);
++		break;
++	default:
++		return;
++	}
++
++	/* the firmware-provided station count must fit in the received event */
++	sta_num = le16_to_cpu(res->sta_num);
++	if (sta_num > (skb->len - sizeof(*res)) / elem_size)
++		return;
++
++	for (i = 0; i < sta_num; i++) {
+ 		u8 ac;
+ 		u16 wlan_idx;
+ 		struct mt76_wcid *wcid;

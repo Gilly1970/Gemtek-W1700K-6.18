@@ -1,0 +1,108 @@
+From: Gilly1970 <gilroyscott@hotmail.com>
+Date: Thu, 4 Aug 2026 18:47:28 +1000
+Subject: [PATCH] wifi: mt76: mt7996: clear NPU per-wcid station bitmap on teardown
+
+The Airoha NPU keeps a per-wcid station bitmap in its RRO SRAM that its
+firmware never clears on its own.  When a station disconnects and a
+reconnecting station is later handed the same wcid, the inherited (stale)
+bits wedge that station's forwarded/uplink offload (FOE_ID=0 storm),
+recoverable only by reboot. This is the bug that blocks running bridger /
+flowtable offload on the W1700K across client reconnects.
+
+The handler indexes icv_error_table[wcid] (0x402 words, one per wcid, bits
+per TID) SRAM the RRO/RX hardware consults directly (no CPU read path in
+the firmware, which is why a stale entry is invisible yet fatal). On
+teardown we issue CLEAR for every TID (0..7) of the departing wcid, zeroing
+its word. CLEAR touches only that wcid's word, so it can never disturb
+another active station.
+
+Uses the same rcu_read_lock() + GFP_ATOMIC pattern as the existing runtime
+NPU calls (mt76_npu_send_txrx_addr / rx_poll_complete).
+
+---
+ mt7996/main.c   |  4 ++++
+ mt7996/mt7996.h |  6 ++++++
+ mt7996/npu.c    | 28 ++++++++++++++++++++++++++++
+ 3 files changed, 38 insertions(+)
+
+diff --git a/mt7996/main.c b/mt7996/main.c
+index 3378bce..08b5df9 100644
+--- a/mt7996/main.c
++++ b/mt7996/main.c
+@@ -1308,6 +1308,10 @@ void mt7996_mac_sta_remove_link(struct mt7996_dev *dev,
+ 		if (phy)
+ 			phy->mt76->num_sta--;
+ 
++		/* clear the NPU's stale per-wcid offload context before the
++		 * index can be reused by a reconnecting station */
++		mt7996_npu_sta_remove(dev, &msta_link->wcid);
++
+ 		rcu_assign_pointer(msta->link[link_id], NULL);
+ 		rcu_assign_pointer(dev->mt76.wcid[msta_link->wcid.idx], NULL);
+ 		mt76_wcid_mask_clear(dev->mt76.wcid_mask, msta_link->wcid.idx);
+diff --git a/mt7996/mt7996.h b/mt7996/mt7996.h
+index 02d770a..e6ecd5b 100644
+--- a/mt7996/mt7996.h
++++ b/mt7996/mt7996.h
+@@ -1014,6 +1014,7 @@ int __mt7996_npu_hw_init(struct mt7996_dev *dev);
+ int mt7996_npu_hw_init(struct mt7996_dev *dev);
+ int mt7996_npu_hw_stop(struct mt7996_dev *dev);
+ int mt7996_npu_rx_queues_init(struct mt7996_dev *dev);
++void mt7996_npu_sta_remove(struct mt7996_dev *dev, struct mt76_wcid *wcid);
+ #else
+ static inline int __mt7996_npu_hw_init(struct mt7996_dev *dev)
+ {
+@@ -1034,6 +1035,11 @@ static inline int mt7996_npu_rx_queues_init(struct mt7996_dev *dev)
+ {
+ 	return 0;
+ }
++
++static inline void mt7996_npu_sta_remove(struct mt7996_dev *dev,
++					 struct mt76_wcid *wcid)
++{
++}
+ #endif /* CONFIG_MT7996_NPU */
+ 
+ #endif
+diff --git a/mt7996/npu.c b/mt7996/npu.c
+index b8006b8..737d619 100644
+--- a/mt7996/npu.c
++++ b/mt7996/npu.c
+@@ -197,6 +197,34 @@ static int mt7996_npu_txrx_offload_init(struct mt7996_dev *dev,
+ 	return 0;
+ }
+ 
++/* NPU "delete station": clear the departing wcid's per-TID station bitmap in
++ * the NPU's RRO SRAM so a reconnecting station that reuses the wcid does not
++ * inherit stale bits, which otherwise wedge its uplink offload and block 
++ * bridger/flowtable on the W1700K.
++ */
++#define MT7996_NPU_STA_BITMAP_CLEAR	1
++#define MT7996_NPU_STA_TID_COUNT	8
++
++void mt7996_npu_sta_remove(struct mt7996_dev *dev, struct mt76_wcid *wcid)
++{
++	struct airoha_npu *npu;
++	u32 tid;
++
++	if (wcid->idx > 0x7ff)
++		return;
++
++	rcu_read_lock();
++	npu = rcu_dereference(dev->mt76.mmio.npu);
++	if (npu)
++		for (tid = 0; tid < MT7996_NPU_STA_TID_COUNT; tid++)
++			if (mt76_npu_send_msg(npu, MT7996_NPU_STA_BITMAP_CLEAR,
++					      WLAN_FUNC_SET_WAIT_DEL_STA,
++					      (tid << 11) | wcid->idx,
++					      GFP_ATOMIC))
++				break;
++	rcu_read_unlock();
++}
++
+ static int mt7996_npu_offload_init(struct mt7996_dev *dev,
+ 				   struct airoha_npu *npu)
+ {
+-- 
+2.43.0
+

@@ -6,6 +6,8 @@
 # Build system Install Note  - Run on Ubuntu 24.04 or later
 #                            - sudo apt update
 #                            - sudo apt install dos2unix rsync patch
+#                            - for bridger (eBPF): sudo apt install clang llvm
+#                              (the script auto-builds .llvm-host/ symlinks from these)
 # Usage:
 #
 #   ./Openwrt_Gemtek_w1700k.sh
@@ -31,7 +33,7 @@ readonly OPENWRT_REPO="https://github.com/openwrt/openwrt.git"
 #readonly OPENWRT_REPO="/home/user/openwrt/repos/openwrt"
 
 OPENWRT_BRANCH="master"
-readonly OPENWRT_COMMIT="5ecd3173d66fef60c5dfa06bcadb2d68aec87c20"
+readonly OPENWRT_COMMIT="29912055552480e5aedc9b81facc82709f1cf7d7"
 
 # --- Directory and File Configuration ---
 readonly SOURCE_DEFAULT_CONFIG_DIR="config"
@@ -44,6 +46,7 @@ readonly LUCI_APPS_ADD_LIST="$SOURCE_LUCI_APPS_DIR/add-apps"
 
 readonly OPENWRT_DIR="openwrt"
 readonly SCRIPT_EXECUTABLE_NAME=$(basename "$0")
+readonly REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 
 # --- Functions ---
@@ -56,6 +59,26 @@ show_usage() {
 
 log() {
     echo "[$(date +'%Y-%m-%d %H:%M:%S')] - $1" >&2
+}
+
+setup_bpf_toolchain() {
+    local hostbin="$REPO_ROOT/.llvm-host/bin" t src
+    grep -q '^CONFIG_PACKAGE_bridger=y' "$REPO_ROOT/$SOURCE_DEFAULT_CONFIG_DIR/config.diff" 2>/dev/null || return 0
+    if ! command -v clang &> /dev/null; then
+        log "WARNING: bridger is selected but 'clang' is not installed — its eBPF build will fail."
+        log "         Install it:  sudo apt install clang llvm"
+        return 0
+    fi
+    mkdir -p "$hostbin"
+    for t in clang clang++ opt llc llvm-dis llvm-strip llvm-objcopy llvm-ar llvm-nm; do
+        if command -v "$t" &> /dev/null; then
+            src="$(command -v "$t")"
+        else
+            src="$(ls /usr/bin/${t}-* 2>/dev/null | sort -V | tail -1)"
+        fi
+        [ -n "$src" ] && ln -sf "$src" "$hostbin/$t"
+    done
+    log "BPF/LLVM host toolchain linked in $hostbin"
 }
 
 require_command() {
@@ -386,6 +409,10 @@ main() {
         log "Applying custom build configuration..."
         if [ -f "../$SOURCE_DEFAULT_CONFIG_DIR/config.diff" ]; then
             cp "../$SOURCE_DEFAULT_CONFIG_DIR/config.diff" .config
+            setup_bpf_toolchain
+            if grep -q '^CONFIG_BPF_TOOLCHAIN_HOST_PATH=' .config; then
+                sed -i "s|^CONFIG_BPF_TOOLCHAIN_HOST_PATH=.*|CONFIG_BPF_TOOLCHAIN_HOST_PATH=\"$REPO_ROOT/.llvm-host\"|" .config
+            fi
         else
             log "Warning: No 'defconfig' found."
         fi
