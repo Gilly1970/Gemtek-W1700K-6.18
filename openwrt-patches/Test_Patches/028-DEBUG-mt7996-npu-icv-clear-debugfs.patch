@@ -1,0 +1,60 @@
+From: Gilly1970 <gilroyscott@hotmail.com>
+Subject: [PATCH] 028-DEBUG-mt7996-npu-icv-clear-debugfs
+
+---
+ mt7996/debugfs.c | 32 ++++++++++++++++++++++++++++++++
+ 1 file changed, 32 insertions(+)
+
+diff --git a/mt7996/debugfs.c b/mt7996/debugfs.c
+index cd5d07e..0d01e22 100644
+--- a/mt7996/debugfs.c
++++ b/mt7996/debugfs.c
+@@ -20,6 +20,35 @@ struct hw_queue_map {
+ 	u8 qid;
+ };
+ 
++#ifdef CONFIG_MT7996_NPU
++
++static int
++mt7996_npu_icv_clear_set(void *data, u64 val)
++{
++	struct mt7996_dev *dev = data;
++	struct airoha_npu *npu;
++	u32 tid, idx = (u32)val;
++
++	rcu_read_lock();
++	npu = rcu_dereference(dev->mt76.mmio.npu);
++	if (!npu)
++		goto out;
++
++	if (val == U64_MAX)
++		mt76_npu_send_msg(npu, 3, WLAN_FUNC_SET_WAIT_DEL_STA, 0,
++				  GFP_ATOMIC);			/* CLEAR_ALL */
++	else if (idx <= 0x7ff)
++		for (tid = 0; tid < 9; tid++)			/* TIDs 0..8 */
++			mt76_npu_send_msg(npu, 1, WLAN_FUNC_SET_WAIT_DEL_STA,
++					  (tid << 11) | idx, GFP_ATOMIC);
++out:
++	rcu_read_unlock();
++	return 0;
++}
++DEFINE_DEBUGFS_ATTRIBUTE(fops_npu_icv_clear, NULL, mt7996_npu_icv_clear_set,
++			 "%llu\n");
++#endif /* CONFIG_MT7996_NPU */
++
+ static int
+ mt7996_implicit_txbf_set(void *data, u64 val)
+ {
+@@ -926,6 +955,9 @@ int mt7996_init_debugfs(struct mt7996_dev *dev)
+ 			    &mt7996_fw_util_wa_fops);
+ 	debugfs_create_file("implicit_txbf", 0600, dir, dev,
+ 			    &fops_implicit_txbf);
++#ifdef CONFIG_MT7996_NPU
++	debugfs_create_file("npu_icv_clear", 0200, dir, dev, &fops_npu_icv_clear);
++#endif
+ 	debugfs_create_devm_seqfile(dev->mt76.dev, "twt_stats", dir,
+ 				    mt7996_twt_stats);
+ 	debugfs_create_file("rf_regval", 0600, dir, dev, &fops_rf_regval);
+-- 
+2.43.0
+
