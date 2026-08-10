@@ -27,7 +27,7 @@ index cd5d07e..0d01e22 100644
 +	if (!npu)
 +		goto out;
 +
-+	if (val == U64_MAX)
++	if (idx == U32_MAX)
 +		mt76_npu_send_msg(npu, 3, WLAN_FUNC_SET_WAIT_DEL_STA, 0,
 +				  GFP_ATOMIC);			/* CLEAR_ALL */
 +	else if (idx <= 0x7ff)
