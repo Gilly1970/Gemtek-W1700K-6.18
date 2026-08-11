@@ -5,17 +5,24 @@ define Build/an7581-emmc-bl2-bl31-uboot
 endef
 
 define Build/an7581-preloader
+  $(STAGING_DIR_HOST)/bin/fiptool create \
+		--tb-fw $(STAGING_DIR_IMAGE)/an7581-bl2.bin \
+		$(STAGING_DIR_IMAGE)/an7581_$1-bl2.fip
   cat $(STAGING_DIR_IMAGE)/an7581_$1-bl2.fip >> $@
 endef
 
 define Build/an7581-bl31-uboot
+  $(STAGING_DIR_HOST)/bin/fiptool create \
+		--soc-fw $(STAGING_DIR_IMAGE)/an7581-bl31.lzma \
+		--nt-fw $(STAGING_DIR_IMAGE)/an7581_$1-u-boot.lzma \
+		$(STAGING_DIR_IMAGE)/an7581_$1-bl31-u-boot.fip
   cat $(STAGING_DIR_IMAGE)/an7581_$1-bl31-u-boot.fip >> $@
 endef
 
 define Build/an7581-chainloader
   $(INSTALL_DIR) $(KDIR)/chainload-fit-$(notdir $@)
-  @if [ -f "$(STAGING_DIR_IMAGE)/an7581_$1-u-boot.bin.lzma" ]; then \
-    KERNEL="$(STAGING_DIR_IMAGE)/an7581_$1-u-boot.bin.lzma"; \
+  @if [ -f "$(STAGING_DIR_IMAGE)/an7581_$1-u-boot.lzma" ]; then \
+    KERNEL="$(STAGING_DIR_IMAGE)/an7581_$1-u-boot.lzma"; \
     COMP="lzma"; \
   else \
     KERNEL="$(STAGING_DIR_IMAGE)/an7581_$1-u-boot.bin"; \
@@ -117,8 +124,9 @@ define Device/gemtek_w1700k-ubi2
   KERNEL_INITRAMFS_SUFFIX := -recovery.itb
   IMAGES := sysupgrade.itb
   IMAGE/sysupgrade.itb := append-kernel | fit gzip $$(KDIR)/image-$$(firstword $$(DEVICE_DTS)).dtb external-static-with-rootfs | append-metadata
-  ARTIFACTS := chainload-uboot.itb
-  ARTIFACT/chainload-uboot.itb := an7581-chainloader gemtek_w1700k
+  # No chainload-uboot.itb artifact: the shipped chainloader bricks the W1700K and we
+  # flash a custom u-boot instead. Dropping it also removes the only consumer of a
+  # W1700K-built u-boot, so the uboot-airoha BUILD_DEVICES override is no longer needed.
   SOC := an7581
 endef
 TARGET_DEVICES += gemtek_w1700k-ubi2

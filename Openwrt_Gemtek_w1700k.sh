@@ -26,14 +26,12 @@ fi
 
 
 # --- Main Configuration ---
-
-# OpenWrt Source Details
 readonly OPENWRT_REPO="https://github.com/openwrt/openwrt.git"
 # --- Use this line for local testing (uncomment and set your path) ---
 #readonly OPENWRT_REPO="/home/user/openwrt/repos/openwrt"
 
 OPENWRT_BRANCH="master"
-readonly OPENWRT_COMMIT="652b2e90b3c4d7f5b82ea3c7e67033ee1500f3b1"
+readonly OPENWRT_COMMIT="82e2e4f492d58b5b6afaf5b55d8286c58da9c224"
 
 # --- Directory and File Configuration ---
 readonly SOURCE_DEFAULT_CONFIG_DIR="config"
@@ -137,7 +135,7 @@ prepare_source_directory() {
     find "$source_dir" -type d -exec chmod 755 {} +
     find "$source_dir" -type f -exec chmod 644 {} +
 
-    for sub in "etc/uci-defaults" "root/etc/uci-defaults" "etc/init.d" "root/etc/init.d" "usr/libexec/rpcd" "root/usr/libexec/rpcd"; do
+    for sub in "etc/uci-defaults" "root/etc/uci-defaults" "etc/init.d" "root/etc/init.d" "usr/libexec" "root/usr/libexec"; do
         if [ -d "$source_dir/$sub" ]; then
              log "($dir_name) Fixing permissions in $sub..."
              find "$source_dir/$sub" -type f -exec dos2unix {} +
@@ -292,6 +290,9 @@ install_luci_apps_from_list() {
         log "(LuCI Apps) Copying '$source_name' to '$dest_relative_path'..."
         mkdir -p "$(dirname "$dest_app")"
         cp -r "$source_app" "$dest_app"
+
+        find "$dest_app" -type f \( -name '*.sh' -o -path '*/etc/init.d/*' \
+             -o -path '*/etc/uci-defaults/*' -o -path '*/usr/libexec/*' \) -exec chmod +x {} +
 
     done < <(grep -v -E '^\s*#|^\s*$' "$list_file")
 

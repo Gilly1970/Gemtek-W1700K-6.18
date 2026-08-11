@@ -78,7 +78,7 @@ index b8006b8..737d619 100644
 + * bridger/flowtable on the W1700K.
 + */
 +#define MT7996_NPU_STA_BITMAP_CLEAR	1
-+#define MT7996_NPU_STA_TID_COUNT	8
++#define MT7996_NPU_STA_TID_COUNT	9
 +
 +void mt7996_npu_sta_remove(struct mt7996_dev *dev, struct mt76_wcid *wcid)
 +{
@@ -96,7 +96,7 @@ index b8006b8..737d619 100644
 +					      WLAN_FUNC_SET_WAIT_DEL_STA,
 +					      (tid << 11) | wcid->idx,
 +					      GFP_ATOMIC))
-+				break;
++				continue;
 +	rcu_read_unlock();
 +}
 +

@@ -69,7 +69,6 @@ target/linux/generic/pending-6.18/675-03-nf_flow_table_path-add-DEV_PATH_MTK_WDM
 target/linux/generic/pending-6.18/675-05-nft_flow_offload-add-bridging-support.patch
 target/linux/airoha/patches-6.18/968-net-airoha-Fix-potential-use-after-free-in-airoha_ppe_deinit.patch
 target/linux/airoha/patches-6.18/975-net-airoha-switch-HW-GRO-offload-to-NETIF_F_GRO_HW.patch
-target/linux/airoha/patches-6.18/978-net-airoha-npu-load-firmware-without-sysfs-fallback.patch
 
 ### enable bridge offload for AN7581 target
 target/linux/airoha/an7581/target.mk

@@ -539,6 +539,38 @@ function buildPpeTerminalBody(ppe) {
 	// Prompt + command
 	s += sp(grn,'root@OpenWrt') + sp(mute,':~# ') + sp(wht,'ppe status --watch') + '\n\n';
 
+	// CLIENTS section — per-WiFi-client offload: how many bound (hardware-offloaded)
+	// PPE flows carry each associated station's MAC. Sourced from bnd.client_bnd
+	// (backend matches station MACs from `iw station dump` against eth= in the bind
+	// table); self-filters to WiFi clients. Each direction is its own HW slot.
+	var clients = (bnd.client_bnd && Array.isArray(bnd.client_bnd)) ? bnd.client_bnd.slice() : [];
+	var bandLbl = ['2.4 GHz', '5 GHz', '6 GHz'];
+	clients.sort(function(a, b) { return (b.bnd || 0) - (a.bnd || 0); });
+	var offCount = 0, maxBnd = 0;
+	clients.forEach(function(c) { if ((c.bnd || 0) > 0) offCount++; if ((c.bnd || 0) > maxBnd) maxBnd = c.bnd || 0; });
+
+	s += sp(cyn, '■ CLIENTS') + '  ' + sp(wht, offCount + ' offloaded') +
+	     '  ' + sp(mute, '(' + clients.length + ' assoc)') + '\n';
+	s += sp(sep, divLine) + '\n';
+	if (clients.length === 0) {
+		s += sp(mute, '  no wifi clients') + '\n';
+	} else {
+		var CW = { name: 20, mac: 19, band: 9, bnd: 7 };
+		s += sp(mute, pad('Client', CW.name) + '  ' + pad('MAC', CW.mac) + '  ' + pad('Band', CW.band) + '  ' + pad('Bound', CW.bnd) + '  ') + '\n';
+		clients.forEach(function(c) {
+			var n = c.bnd || 0;
+			var barLen = maxBnd > 0 ? Math.round((n / maxBnd) * 20) : 0;
+			var cCol = n > 0 ? cyn : dim;
+			var nameStr = c.host || c.ip || '—';
+			s += sp(wht, pad(nameStr, CW.name)) + '  ' +
+			     sp(grey, pad(c.mac || '?', CW.mac)) + '  ' +
+			     sp(mute, pad(bandLbl[c.band] || ('band' + c.band), CW.band)) + '  ' +
+			     sp(cCol, pad(String(n), CW.bnd)) + '  ' +
+			     sp(cCol, '█'.repeat(barLen)) + '\n';
+		});
+	}
+	s += '\n';
+
 	// BND section
 	s += sp(cyn,'■ BND') + '  ' + sp(wht, bndTot+' flows');
 	s += '  ' + sp(mute,'(v4:'+(bnd.ipv4||0)+' v6:'+(bnd.ipv6||0)+')') + '\n';

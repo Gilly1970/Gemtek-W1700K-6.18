@@ -274,6 +274,50 @@ get_ppe_entries() {
 	fi
 	bnd_json=$(printf '%s' "$bnd_json" | sed 's/}$/,"port_bnd":'"$port_bnd"'}/')
 
+	# Per-client BND counts: for each connected WiFi station, how many bound (offloaded)
+	# flows carry its MAC in eth=. Reuses the per-band station MAC lists (macs0/1/2) and
+	# the same eth= match as band_bnd/port_bnd. Counts per station independently (a
+	# client<->client flow can credit both ends; the common client<->WAN flow matches
+	# only the client MAC, so no double count in practice).
+	# Per-client BND counts + IP/hostname. Feeds awk three tagged streams: @NEIGH lines
+	# (ip neigh) -> mac->ipv4, @LEASE lines (/tmp/dhcp.leases) -> mac->hostname, then the
+	# raw bind table for the eth= match. Marker prefixes keep them apart (bind rows start
+	# with a hex index, never @NEIGH/@LEASE). Counts per station; IP/host are best-effort.
+	local client_bnd="[]"
+	if [ -f "$bind_file" ]; then
+		client_bnd=$(
+		{
+			printf '%s\n' "$neigh" | sed 's/^/@NEIGH /'
+			sed 's/^/@LEASE /' /tmp/dhcp.leases 2>/dev/null
+			cat "$bind_file"
+		} | awk -v m0="$macs0" -v m1="$macs1" -v m2="$macs2" '
+		BEGIN {
+			ntot=0
+			c=split(m0,a,"|"); for(i=1;i<=c;i++) if(a[i]!=""){ mac[++ntot]=tolower(a[i]); bnd_band[ntot]=0; cnt[ntot]=0 }
+			c=split(m1,a,"|"); for(i=1;i<=c;i++) if(a[i]!=""){ mac[++ntot]=tolower(a[i]); bnd_band[ntot]=1; cnt[ntot]=0 }
+			c=split(m2,a,"|"); for(i=1;i<=c;i++) if(a[i]!=""){ mac[++ntot]=tolower(a[i]); bnd_band[ntot]=2; cnt[ntot]=0 }
+		}
+		$1=="@NEIGH" { ipx=$2; mcx=tolower($6); if(index(ipx,":")==0 && index(ipx,".")>0 && mcx!="" && !(mcx in mac2ip)) mac2ip[mcx]=ipx; next }
+		$1=="@LEASE" { lm=tolower($3); lh=$5; gsub(/["\\]/,"",lh); if(lm!="" && lh!="" && lh!="*") mac2host[lm]=lh; next }
+		/^[0-9a-fA-F]+ BND / {
+			eth=""; match($0,/eth=[^ \t]+/); if(RSTART>0) eth=tolower(substr($0,RSTART+4,RLENGTH-4))
+			if(eth=="") next
+			for(i=1;i<=ntot;i++) if(index(eth,mac[i])>0) cnt[i]++
+		}
+		END {
+			printf "["
+			for(i=1;i<=ntot;i++){
+				ip = (mac[i] in mac2ip) ? mac2ip[mac[i]] : ""
+				host = (mac[i] in mac2host) ? mac2host[mac[i]] : ""
+				if(i>1)printf ","
+				printf "{\"mac\":\"%s\",\"ip\":\"%s\",\"host\":\"%s\",\"band\":%d,\"bnd\":%d}",mac[i],ip,host,bnd_band[i],cnt[i]
+			}
+			printf "]"
+		}
+		' 2>/dev/null || printf "[]")
+	fi
+	bnd_json=$(printf '%s' "$bnd_json" | sed 's/}$/,"client_bnd":'"$client_bnd"'}/')
+
 	printf '{"bnd":%s,"unb":%s}' "$bnd_json" "$unb_json"
 }
 
