@@ -1,0 +1,51 @@
+From 7f9983f9c5e2eb4aba6f95c582f6cb5b6884ca25 Mon Sep 17 00:00:00 2001
+From: Gilly1970 <gilroyscott@hotmail.com>
+Date: Tue, 11 Aug 2026 11:51:01 +1000
+Subject: [PATCH] 029-DEBUG-mt7996-ba-teardown-log
+
+---
+ mt7996/main.c | 21 +++++++++++++++++++++
+ 1 file changed, 21 insertions(+)
+
+diff --git a/mt7996/main.c b/mt7996/main.c
+index 3378bce..9404b09 100644
+--- a/mt7996/main.c
++++ b/mt7996/main.c
+@@ -1264,6 +1264,10 @@ void mt7996_mac_sta_remove_link(struct mt7996_dev *dev,
+ 	if (!msta_link)
+ 		return;
+ 
++	pr_info("mt7996 DBG starm: link=%u wcid=%u flush=%d tx_ampdu=0x%lx sta=%pM\n",
++		link_id, msta_link->wcid.idx, flush,
++		msta_link->wcid.ampdu_state, sta->addr);
++
+ 	spin_lock_bh(&dev->mt76.sta_poll_lock);
+ 	if (!list_empty(&msta_link->wcid.poll_list))
+ 		list_del_init(&msta_link->wcid.poll_list);
+@@ -1701,6 +1705,23 @@ mt7996_ampdu_action(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
+ 
+ 	mtxq = (struct mt76_txq *)txq->drv_priv;
+ 
++	{
++		static const char * const _ba_act[] = {
++			[IEEE80211_AMPDU_RX_START]           = "RX_START",
++			[IEEE80211_AMPDU_RX_STOP]            = "RX_STOP",
++			[IEEE80211_AMPDU_TX_START]           = "TX_START",
++			[IEEE80211_AMPDU_TX_STOP_CONT]       = "TX_STOP_CONT",
++			[IEEE80211_AMPDU_TX_STOP_FLUSH]      = "TX_STOP_FLUSH",
++			[IEEE80211_AMPDU_TX_STOP_FLUSH_CONT] = "TX_STOP_FLUSH_CONT",
++			[IEEE80211_AMPDU_TX_OPERATIONAL]     = "TX_OPERATIONAL",
++		};
++		u32 _a = params->action;
++
++		pr_info("mt7996 DBG ba: %s wcid=%u tid=%u ssn=%u buf=%u sta=%pM\n",
++			(_a < ARRAY_SIZE(_ba_act) && _ba_act[_a]) ? _ba_act[_a] : "?",
++			msta->deflink.wcid.idx, tid, ssn, params->buf_size, sta->addr);
++	}
++
+ 	mutex_lock(&dev->mt76.mutex);
+ 
+ 	switch (params->action) {
+-- 
+2.43.0
+
