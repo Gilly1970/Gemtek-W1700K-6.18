@@ -1076,7 +1076,7 @@ function buildWifiBandTacho(bandIdx, ws, qType, bndCount, unbCount) {
 		var on = i < rtyLit, red = i >= redFrom, rc = on ? (red ? '#ff4d4d' : '#ffcc00') : '#4a4620';
 		p.push('<path d="M ' + arcPoly(R_RTY, a1, a2, 3) + '" fill="none" stroke="' + rc + '" stroke-width="5" stroke-linecap="round" opacity="' + (on ? 0.95 : 0.4) + '"/>');
 	}
-	p.push('<text x="150" y="210" text-anchor="middle" font-family="monospace" font-size="7.5" fill="' + (retry >= 24 ? '#ff4d4d' : '#ffcc00') + '" opacity="0.9">' + retry + '% RTY</text>');
+	p.push('<text x="150" y="214" text-anchor="middle" font-family="monospace" font-size="7.5" fill="' + (retry >= 24 ? '#ff4d4d' : '#ffcc00') + '" opacity="0.9">' + retry + '% RTY</text>');
 
 	// HW-ACCELERATED inner ring (breathes when accelerated) + one-shot pulse on new BND
 	var hwOn = npu && bnd > 0;
@@ -1104,7 +1104,7 @@ function buildWifiBandTacho(bandIdx, ws, qType, bndCount, unbCount) {
 	var lbl = mbps > 0 ? Math.round(mbps) : (sta > 0 ? '0' : '—');
 	p.push('<text x="150" y="176" text-anchor="middle" font-family="monospace" font-size="20" font-weight="700" fill="' + col + '"' + (mbps > 0 ? ' filter="url(#f-wsoft-' + bandIdx + ')"' : '') + '>' + lbl + '</text>');
 	p.push('<text x="150" y="187" text-anchor="middle" font-family="monospace" font-size="7" letter-spacing="2" fill="var(--soc-muted)">MBPS</text>');
-	p.push('<text x="150" y="199" text-anchor="middle" font-family="monospace" font-size="7.5" font-weight="600" fill="var(--soc-muted)">' + sta + ' STA' + (sta > 0 && sig ? '  ' + sig + ' dBm' : '') + '</text>');
+	p.push('<text x="150" y="226" text-anchor="middle" font-family="monospace" font-size="7.5" font-weight="600" fill="var(--soc-muted)">' + sta + ' STA' + (sta > 0 && sig ? '  ' + sig + ' dBm' : '') + '</text>');
 
 	return p.join('');
 }
