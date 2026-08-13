@@ -117,3 +117,6 @@ package/network/services/hostapd/patches/061-hostapd-omit-mlo-link-id-for-non-ml
 ### Add bridger and bump source
 bridger-Makefile:package/network/services/bridger/Makefile
 027-wifi-mt76-mt7996-npu-del-sta-on-teardown.patch:package/kernel/mt76/patches/027-wifi-mt76-mt7996-npu-del-sta-on-teardown.patch
+
+### mt76 031: fanboy's REWORKED 0015 (avoid-stale-npu-wcid-reuse)
+031-wifi-mt76-mt7996-avoid-stale-npu-wcid-reuse.patch:package/kernel/mt76/patches/031-wifi-mt76-mt7996-avoid-stale-npu-wcid-reuse.patch
