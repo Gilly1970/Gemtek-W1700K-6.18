@@ -13,8 +13,6 @@ chmod +x /usr/libexec/npu-jitter-daemon
 /etc/init.d/npu-jitter start
 /etc/init.d/rpcd restart
 
-# Remove default ULA prefix — prevents dual-address source selection issues on clients
-# (devices picking fd::/8 ULA as source for global IPv6 destinations, causing silent drops)
 uci -q delete network.globals.ula_prefix
 uci commit network
 
@@ -27,8 +25,18 @@ uci commit firewall
 uci set system.@system[0].compat_version="2.0"
 uci commit system
 
+if [ -n "$(uci -q get dhcp.odhcpd)" ]; then
+	uci set dhcp.odhcpd.piodir=/etc/odhcpd-piodir
+	uci commit dhcp
+fi
+
 # Enable ARP refresh service (keeps hostnames visible in LuCI connected clients)
 /etc/init.d/arp-refresh enable
 /etc/init.d/arp-refresh start
+
+chmod +x /usr/bin/npu-reboot-guard.sh
+chmod +x /etc/init.d/npu-reboot-guard
+/etc/init.d/npu-reboot-guard enable
+/etc/init.d/npu-reboot-guard start
 
 exit 0

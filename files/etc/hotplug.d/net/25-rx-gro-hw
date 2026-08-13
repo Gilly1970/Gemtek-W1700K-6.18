@@ -1,22 +1,5 @@
 #!/bin/sh
 
-# Enable Airoha hardware GRO offload (rx-gro-hw) on the WAN port at boot.
-#
-# HW GRO is a per-QDMA resource; only a port that owns its QDMA alone
-# exposes it. On the W1700K that is wan -- eth0 and lan2 may share the LAN
-# QDMA, in which case the driver masks the feature off there ("[fixed]").
-# The offload defaults to off, so we opt wan in here.
-#
-# NOTE on the trigger: wan is renamed from eth1 during boot, so the net
-# "add" event for the final name "wan" may never arrive -- gating on
-# DEVICENAME=wan misses it. Instead we act on ANY "add" event and simply
-# (idempotently) ensure wan is enabled once its netdev exists. Later adds
-# (e.g. the phy*-ap* interfaces, which appear after wan) reliably catch it.
-#
-# The guard makes this a harmless no-op unless wan reads exactly "off":
-# it skips "on" (already set), "off [fixed]" (unsupported/masked) and the
-# empty case (feature absent, e.g. a kernel without patch 975).
-
 [ "$ACTION" = "add" ] || exit 0
 command -v ethtool >/dev/null 2>&1 || exit 0
 
