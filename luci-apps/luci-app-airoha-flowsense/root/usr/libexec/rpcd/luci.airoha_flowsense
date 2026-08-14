@@ -880,7 +880,7 @@ ${d}" ;;
 		stats=$(echo "$dump" | awk -v band_per="${band_per:-0}" '
 		BEGIN {
 			stations=0; tx_pkts=0; tx_retries=0; tx_failed=0
-			sum_phy=0; sum_exp=0; phy_count=0; exp_count=0
+			sum_phy=0; phy_count=0
 			sum_sig=0; sig_count=0; min_sig=0
 		}
 		/^Station / { stations++ }
@@ -888,11 +888,6 @@ ${d}" ;;
 		/tx retries:/ { tx_retries += $3+0 }
 		/tx failed:/ { tx_failed += $3+0 }
 		/tx bitrate:/ { sum_phy += $3+0; phy_count++ }
-		/expected throughput:/ {
-			v = $3+0
-			gsub(/[^0-9.]/, "", v)
-			if (v+0 > 0) { sum_exp += v+0; exp_count++ }
-		}
 		/signal avg:/ {
 			for (i = 1; i <= NF; i++) {
 				if ($i ~ /^-[0-9]+$/) {
@@ -905,15 +900,13 @@ ${d}" ;;
 		}
 		END {
 			avg_phy = (phy_count > 0) ? sum_phy/phy_count : 0
-			avg_exp = (exp_count > 0) ? sum_exp/exp_count : 0
-			efficiency = (avg_phy > 0) ? int(avg_exp / avg_phy * 100) : 0
 			# Real per-MPDU Tx PER from mt76 debugfs (passed in) as retry/error %;
 			# raw tx_retries/tx_packets still emitted below but their ratio
 			# over-reads on EHT (per-MPDU vs per-MSDU) so it is not used for health.
 			retry_pct = band_per + 0
 			avg_sig = (sig_count > 0) ? int(sum_sig / sig_count) : 0
-			printf "%d %d %d %d %.1f %.1f %d %d %d %d", \
-				stations, tx_pkts, tx_retries, tx_failed, avg_phy, avg_exp, efficiency, retry_pct, avg_sig, min_sig
+			printf "%d %d %d %d %.1f %d %d %d", \
+				stations, tx_pkts, tx_retries, tx_failed, avg_phy, retry_pct, avg_sig, min_sig
 		}')
 
 		set -- $stats
@@ -924,7 +917,7 @@ ${d}" ;;
 			1) sta_tx_raw="$sta_tx1" ;;
 			2) sta_tx_raw="$sta_tx2" ;;
 		esac
-		bands_json="${bands_json}{\"band\":${band_idx},\"stations\":${1:-0},\"tx_packets\":${2:-0},\"tx_retries\":${3:-0},\"tx_failed\":${4:-0},\"avg_phy_rate\":${5:-0},\"avg_exp_throughput\":${6:-0},\"airtime_efficiency\":${7:-0},\"retry_pct\":${8:-0},\"avg_signal\":${9:-0},\"min_signal\":${10:-0},\"tx_mbps\":${tx_mbps},\"rx_mbps\":${rx_mbps:-0},\"frames_ps\":${frames_ps:-0},\"tx_bytes_raw\":${sta_tx_raw:-0}}"
+		bands_json="${bands_json}{\"band\":${band_idx},\"stations\":${1:-0},\"tx_packets\":${2:-0},\"tx_retries\":${3:-0},\"tx_failed\":${4:-0},\"avg_phy_rate\":${5:-0},\"retry_pct\":${6:-0},\"avg_signal\":${7:-0},\"min_signal\":${8:-0},\"tx_mbps\":${tx_mbps},\"rx_mbps\":${rx_mbps:-0},\"frames_ps\":${frames_ps:-0},\"tx_bytes_raw\":${sta_tx_raw:-0}}"
 	done
 
 	printf '{"available":true,"mlo":%s,"bands":[%s]}' "$([ "$is_mld" = 1 ] && echo true || echo false)" "$bands_json"

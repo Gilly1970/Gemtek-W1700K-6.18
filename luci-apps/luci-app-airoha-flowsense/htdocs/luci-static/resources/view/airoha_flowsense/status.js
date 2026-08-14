@@ -1059,11 +1059,11 @@ function buildWifiBandTacho(bandIdx, ws, qType, bndCount, unbCount) {
 	ws = ws || {};
 	var info = bandInfo[bandIdx] || { name: 'Band '+bandIdx, gaugeCol: '#888', sMax: 1000, sStep: 200, sDiv: 1, sCap: 'MBPS' };
 	var col  = info.gaugeCol || '#888';
-	// Real measured throughput = tx + rx byte-rate (mac80211 per-sta counters). expected
-	// throughput reads 0 on MT7996 fw, so fall back to it only if bytes are unavailable.
+	// Real measured throughput = tx + rx byte-rate (mac80211 per-sta counters).
+	// Needle reads 0 at idle. No expected-throughput fallback: on builds whose mt76
+	// populates that field it reports link capability, not throughput, so it made the
+	// needle show a large ghost value at idle (seen on fanboy's ubi2 build).
 	var mbps = (ws.tx_mbps || 0) + (ws.rx_mbps || 0);
-	if (mbps === 0 && (ws.avg_exp_throughput || 0) > 0)
-		mbps = ws.avg_exp_throughput * (100 - (ws.retry_pct || 0)) / 100;
 	var retry = ws.retry_pct || 0;
 	var bnd   = bndCount || 0;
 	var sta   = ws.stations || 0;
