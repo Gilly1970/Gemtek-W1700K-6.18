@@ -1,5 +1,5 @@
 From: Lorenzo Bianconi <lorenzo@kernel.org>
-Subject: [PATCH net-next v2] net: airoha: Add retry mechanism to airoha_qdma_set_trtcm_param
+Subject: [PATCH net-next v4] net: airoha: Add retry mechanism to airoha_qdma_set_trtcm_param
 
 Replace the single write + RW_DONE poll in airoha_qdma_set_trtcm_param()
 with a write-and-verify retry loop. The hardware can silently fail to
@@ -7,14 +7,18 @@ commit a TRTCM parameter write (RW_DONE asserts but the stored value
 differs from what was written), so wait for RW_DONE, verify the readback
 matches, and retry up to 100 times before returning an error.
 
+v4: add a wmb() after the CFG_PARAM trigger write, and retry (rather than
+bail with -ETIMEDOUT) when the RW_DONE poll times out so the retry loop
+also covers the timeout path.
+
 Signed-off-by: Lorenzo Bianconi <lorenzo@kernel.org>
 ---
- drivers/net/ethernet/airoha/airoha_eth.c | 30 +++++++++++++++++++------
- 1 file changed, 23 insertions(+), 7 deletions(-)
+ drivers/net/ethernet/airoha/airoha_eth.c | 27 ++++++++++++++++++------
+ 1 file changed, 24 insertions(+), 3 deletions(-)
 
 --- a/drivers/net/ethernet/airoha/airoha_eth.c
 +++ b/drivers/net/ethernet/airoha/airoha_eth.c
-@@ -3089,14 +3089,30 @@
+@@ -3089,14 +3089,31 @@
  		     FIELD_PREP(TRTCM_METER_GROUP_MASK, group) |
  		     FIELD_PREP(TRTCM_PARAM_INDEX_MASK, idx) |
  		     FIELD_PREP(TRTCM_PARAM_RATE_TYPE_MASK, mode);
@@ -23,7 +27,7 @@ Signed-off-by: Lorenzo Bianconi <lorenzo@kernel.org>
 -	airoha_qdma_wr(qdma, REG_TRTCM_DATA_LOW(addr), val);
 -	airoha_qdma_wr(qdma, REG_TRTCM_CFG_PARAM(addr), config);
 +	for (i = 0; i < 100; i++) {
-+		u32 data;
++		u32 data = 0;
  
 -	return read_poll_timeout(airoha_qdma_rr, val,
 -				 val & TRTCM_PARAM_RW_DONE_MASK,
@@ -32,12 +36,13 @@ Signed-off-by: Lorenzo Bianconi <lorenzo@kernel.org>
 +		airoha_qdma_wr(qdma, REG_TRTCM_DATA_LOW(addr), val);
 +		wmb();
 +		airoha_qdma_wr(qdma, REG_TRTCM_CFG_PARAM(addr), config);
++		wmb();
 +
 +		if (read_poll_timeout(airoha_qdma_rr, data,
 +				      data & TRTCM_PARAM_RW_DONE_MASK,
 +				      USEC_PER_MSEC, 10 * USEC_PER_MSEC,
 +				      true, qdma, REG_TRTCM_CFG_PARAM(addr)))
-+			return -ETIMEDOUT;
++			continue;
 +
 +		if (airoha_qdma_get_trtcm_param(qdma, channel, addr, param,
 +						mode, &data, NULL))
