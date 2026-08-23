@@ -1,0 +1,33 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Tao Gong <gongtao0607@gmail.com>
+Date: Sat, 22 Aug 2026 00:00:00 +0000
+Subject: [PATCH] wifi: mt76: mt7996: fix struct mt7996_mcu_wed_rro_ba_delete_event layout
+
+Correct the definition of struct mt7996_mcu_wed_rro_ba_delete_event to
+match the 12-byte event record layout sent by firmware. The size mismatch
+previously resulted in misaligned event parsing when processing batch BA
+session deletions.
+
+The UNI_WED_RRO_BA_SESSION_DELETE handler in mt7996_mcu_wed_rro_event()
+walks a batch of these records, striding by sizeof(*e) and reading
+e->session_id from each. With the struct 4 bytes too short, every record
+after the first is read at the wrong offset, so garbage session ids get
+queued onto dev->wed_rro.poll_list and recycled by dev->wed_rro.work,
+corrupting HW_RRO session bookkeeping. The sibling status struct
+mt7996_mcu_wed_rro_ba_event already carries wlan_id/tid/__rsv1 in the
+same position, confirming the true firmware layout.
+
+Signed-off-by: Tao Gong <gongtao0607@gmail.com>
+---
+--- a/mt7996/mcu.h
++++ b/mt7996/mcu.h
+@@ -284,6 +284,9 @@ struct mt7996_mcu_wed_rro_ba_delete_event {
+ 	__le16 len;
+
+ 	__le16 session_id;
++	__le16 wlan_id;
++	u8 tid;
++	u8 __rsv1;
+ 	u8 __rsv2[2];
+ } __packed;
+

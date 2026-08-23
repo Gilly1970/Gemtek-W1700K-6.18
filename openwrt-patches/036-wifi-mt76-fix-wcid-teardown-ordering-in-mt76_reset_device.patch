@@ -1,0 +1,27 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Ryan Leung <lrd.airoha@gmail.com>
+Date: Fri, 22 Aug 2026 00:00:00 +0000
+Subject: [PATCH] wifi: mt76: fix wcid teardown ordering in mt76_reset_device
+
+mt76_reset_device() ran mt76_wcid_cleanup() while the wcid was still
+published in dev->wcid[i], only clearing the pointer afterwards.  During
+cleanup the wcid is therefore still reachable by concurrent lookups (TX
+status, RX), which can grab and use a wcid that is being torn down.
+
+Unpublish first: NULL dev->wcid[i], then run mt76_wcid_cleanup().  This
+mirrors the correct add ordering (publish last) so no new lookup can find
+the wcid once teardown has begun.
+
+Signed-off-by: Ryan Leung <lrd.airoha@gmail.com>
+---
+--- a/mac80211.c
++++ b/mac80211.c
+@@ -856,8 +856,8 @@ void mt76_reset_device(struct mt76_dev *dev)
+ 			continue;
+
+ 		wcid->sta = 0;
+-		mt76_wcid_cleanup(dev, wcid);
+ 		rcu_assign_pointer(dev->wcid[i], NULL);
++		mt76_wcid_cleanup(dev, wcid);
+ 	}
+ 	rcu_read_unlock();

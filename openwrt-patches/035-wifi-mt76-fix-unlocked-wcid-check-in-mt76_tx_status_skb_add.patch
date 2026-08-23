@@ -1,0 +1,45 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Ryan Leung <lrd.airoha@gmail.com>
+Date: Fri, 22 Aug 2026 00:00:00 +0000
+Subject: [PATCH] wifi: mt76: fix unlocked wcid check in mt76_tx_status_skb_add
+
+mt76_tx_status_skb_add() tested whether the wcid was still published
+(rcu_access_pointer(dev->wcid[wcid->idx])) OUTSIDE dev->status_lock.
+Between that test passing and taking the lock to allocate a packet id
+into wcid->pktid, the wcid can be torn down and unpublished, or its
+index reused for a different station.  The stale/reused wcid then gets a
+pktid allocated and is linked onto dev->wcid_list, so TX status is later
+accounted against a wcid that is no longer the owner of that index.
+
+Drop the unlocked test (keep only the !wcid guard) and instead verify,
+under status_lock, that dev->wcid[wcid->idx] still points at THIS wcid
+before allocating.  The pointer-identity check also rejects index reuse,
+which the previous non-NULL test did not catch.  The WED / NO_ACK fast
+paths return before the lock is taken, so the offload hot path is
+unaffected.
+
+Signed-off-by: Ryan Leung <lrd.airoha@gmail.com>
+---
+--- a/tx.c
++++ b/tx.c
+@@ -129,7 +129,7 @@ mt76_tx_status_skb_add(struct mt76_dev *dev, struct mt76_wcid *wcid,
+
+ 	memset(cb, 0, sizeof(*cb));
+
+-	if (!wcid || !rcu_access_pointer(dev->wcid[wcid->idx]))
++	if (!wcid)
+ 		return MT_PACKET_ID_NO_ACK;
+
+ 	if (info->flags & IEEE80211_TX_CTL_NO_ACK)
+@@ -147,6 +147,11 @@ mt76_tx_status_skb_add(struct mt76_dev *dev, struct mt76_wcid *wcid,
+
+ 	spin_lock_bh(&dev->status_lock);
+
++	if (rcu_access_pointer(dev->wcid[wcid->idx]) != wcid) {
++		pid = MT_PACKET_ID_NO_ACK;
++		goto out;
++	}
++
+ 	pid = idr_alloc(&wcid->pktid, skb, MT_PACKET_ID_FIRST,
+ 			MT_PACKET_ID_MASK, GFP_ATOMIC);
+ 	if (pid < 0) {
