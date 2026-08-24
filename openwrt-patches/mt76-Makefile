@@ -414,6 +414,14 @@ ifdef CONFIG_PACKAGE_MAC80211_MESH
   NOSTDINC_FLAGS += -DCONFIG_MAC80211_MESH
 endif
 
+# mac80211 comes from backports, whose autoconf.h defines CPTCFG_MAC80211_DEBUGFS
+# but never CONFIG_MAC80211_DEBUGFS - so every "#ifdef CONFIG_MAC80211_DEBUGFS"
+# block in mt76 (per-sta/per-link debugfs: hw-queues, fixed_rate, and our per-link
+# stats from patch 038) is silently compiled OUT. Map it like MESH above.
+ifdef CONFIG_PACKAGE_MAC80211_DEBUGFS
+  NOSTDINC_FLAGS += -DCONFIG_MAC80211_DEBUGFS
+endif
+
 ifdef CONFIG_PACKAGE_CFG80211_TESTMODE
   NOSTDINC_FLAGS += -DCONFIG_NL80211_TESTMODE
   PKG_MAKE_FLAGS += CONFIG_NL80211_TESTMODE=y

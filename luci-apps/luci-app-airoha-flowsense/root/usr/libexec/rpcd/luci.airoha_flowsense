@@ -170,16 +170,38 @@ get_ppe_entries() {
 	fi
 
 	# Per-band BND counts: collect client MACs per band, match against eth= in bind file
-	local macs0 macs1 macs2
+	local macs0 macs1 macs2 mldif mldsdir mst mmac
 	macs0=$(iw dev 2>/dev/null | awk '/Interface phy[0-9]*\.0-/{print $2}' | while read -r iface; do
 		iw dev "$iface" station dump 2>/dev/null | awk '/^Station/{print $2}'
-	done | tr '\n' '|' | sed 's/|$//')
+	done)
 	macs1=$(iw dev 2>/dev/null | awk '/Interface phy[0-9]*\.1-/{print $2}' | while read -r iface; do
 		iw dev "$iface" station dump 2>/dev/null | awk '/^Station/{print $2}'
-	done | tr '\n' '|' | sed 's/|$//')
+	done)
 	macs2=$(iw dev 2>/dev/null | awk '/Interface phy[0-9]*\.2-/{print $2}' | while read -r iface; do
 		iw dev "$iface" station dump 2>/dev/null | awk '/^Station/{print $2}'
-	done | tr '\n' '|' | sed 's/|$//')
+	done)
+	# MLO: MLD clients live on ap-mld* (no phyX.N- name), so the scan above misses
+	# them and their offloaded flows never set band_bnd -> the frontend never leaves
+	# the exact byte-rate. Classify each MLD station into every band it has a
+	# link-N debugfs dir on.
+	for mldif in $(iw dev 2>/dev/null | awk '/Interface/{i=$2} /type AP/{print i}'); do
+		case "$mldif" in *-mld*) ;; *) continue ;; esac
+		mldsdir="/sys/kernel/debug/ieee80211/phy0/netdev:${mldif}/stations"
+		[ -d "$mldsdir" ] || continue
+		for mst in "$mldsdir"/*/; do
+			[ -d "$mst" ] || continue
+			mmac=$(basename "$mst")
+			[ -d "${mst}link-0" ] && macs0="${macs0}
+${mmac}"
+			[ -d "${mst}link-1" ] && macs1="${macs1}
+${mmac}"
+			[ -d "${mst}link-2" ] && macs2="${macs2}
+${mmac}"
+		done
+	done
+	macs0=$(printf '%s\n' "$macs0" | grep -v '^[[:space:]]*$' | tr '\n' '|' | sed 's/|$//')
+	macs1=$(printf '%s\n' "$macs1" | grep -v '^[[:space:]]*$' | tr '\n' '|' | sed 's/|$//')
+	macs2=$(printf '%s\n' "$macs2" | grep -v '^[[:space:]]*$' | tr '\n' '|' | sed 's/|$//')
 
 	local band_bnd="[0,0,0]"
 	if [ -f "$bind_file" ]; then
@@ -193,9 +215,11 @@ get_ppe_entries() {
 		}
 		/^[0-9a-fA-F]+ BND / {
 			eth=""; match($0,/eth=[^ \t]+/); if (RSTART>0) eth=substr($0,RSTART+4,RLENGTH-4)
+			# an MLD client is listed on EVERY band it has a link on, so
+			# count its flows on each (else-if starved the higher bands)
 			if (has(m0,eth)) c0++
-			else if (has(m1,eth)) c1++
-			else if (has(m2,eth)) c2++
+			if (has(m1,eth)) c1++
+			if (has(m2,eth)) c2++
 		}
 		END { printf "[%d,%d,%d]", c0+0, c1+0, c2+0 }
 		' "$bind_file" 2>/dev/null || printf "[0,0,0]")
@@ -235,9 +259,9 @@ get_ppe_entries() {
 				if (substr(orig,1,1) != "[") { n=split(orig,p,":"); src=p[1] }
 			}
 			if (src != "") {
-				if      (has(i0,src)) c0++
-				else if (has(i1,src)) c1++
-				else if (has(i2,src)) c2++
+				if (has(i0,src)) c0++
+				if (has(i1,src)) c1++
+				if (has(i2,src)) c2++
 			}
 		}
 		END { printf "[%d,%d,%d]", c0+0, c1+0, c2+0 }
@@ -701,9 +725,16 @@ get_wifi_stats() {
 				done
 				case "$b" in 0) rxfrag0=$frag ;; 1) rxfrag1=$frag ;; 2) rxfrag2=$frag ;; esac
 				[ -z "$bmacs" ] && continue
+				# Keep the MLD station visible on every linked band for
+				# counts/signal/rate, but STRIP its byte counters: iw shows one
+				# MLD-aggregate value which would double-count into every band.
+				# Per-band throughput for MLD traffic comes from the hw_
+				# fields (MIB + fw stats) computed below instead.
 				bd=$(printf '%s\n' "$mfull" | awk -v macs="$bmacs" '
 					BEGIN { n = split(macs, a, " "); for (i = 1; i <= n; i++) want[tolower(a[i])] = 1 }
 					/^Station/ { keep = (tolower($2) in want) }
+					keep && /(tx|rx) bytes:/ { next }
+					keep && /(tx|rx) duration:/ { next }
 					keep { print }')
 				case "$b" in
 					0) dump0="${dump0}
@@ -830,6 +861,78 @@ ${d}" ;;
 	rx1_mbps=$(echo "$_rates" | awk '{print $5}')
 	rx2_mbps=$(echo "$_rates" | awk '{print $6}')
 
+	# HW (offload-surviving) per-band byte rates — exact where available:
+	#  - hwrx (uplink): per-band MAC MIB rx_ampdu_bytes (mt76 band_bytes debugfs,
+	#    driver patch 041). Counts at the MAC: sees NPU/WED-offloaded traffic AND
+	#    every link of an MLD station. u32 accumulators -> modular delta.
+	#  - hwtx (downlink): sum of per-station fw ADM tx_bytes ('stats' debugfs,
+	#    driver patches 038/039). Exact for normal stations and an MLD's setup
+	#    link; the fw does not account an MLD's secondary-link DL (air_mbps
+	#    remains the fallback for that case). Legacy clients on an MLD SSID have
+	#    no per-band path and are skipped here (covered by iw exact + air est).
+	local hwrx0=0 hwrx1=0 hwrx2=0 hwtx0=0 hwtx1=0 hwtx2=0
+	local BB=/sys/kernel/debug/ieee80211/phy0/mt76/band_bytes
+	if [ -r "$BB" ]; then
+		local mib_cur stx0=0 stx1=0 stx2=0 sf sv sb
+		mib_cur=$(awk '/Phy band/{b=$3} /rx_ampdu_bytes:/{v[b]=$2} END{printf "%.0f %.0f %.0f", v[0]+0, v[1]+0, v[2]+0}' "$BB" 2>/dev/null)
+		for sf in /sys/kernel/debug/ieee80211/phy0/netdev:*/stations/*/stats \
+			  /sys/kernel/debug/ieee80211/phy0/netdev:*/stations/*/link-*/stats; do
+			[ -r "$sf" ] || continue
+			case "$sf" in
+				*/link-0/stats) sb=0 ;;
+				*/link-1/stats) sb=1 ;;
+				*/link-2/stats) sb=2 ;;
+				*netdev:phy0.0-*) sb=0 ;;
+				*netdev:phy0.1-*) sb=1 ;;
+				*netdev:phy0.2-*) sb=2 ;;
+				*) continue ;;
+			esac
+			sv=$(awk '/^tx_bytes:/{print $2}' "$sf" 2>/dev/null)
+			case "$sb" in
+				0) stx0=$((stx0 + ${sv:-0})) ;;
+				1) stx1=$((stx1 + ${sv:-0})) ;;
+				2) stx2=$((stx2 + ${sv:-0})) ;;
+			esac
+		done
+		local _hw
+		_hw=$(awk -v now="$now" -v m="$mib_cur" -v t0="$stx0" -v t1="$stx1" -v t2="$stx2" '
+			BEGIN {
+				pf = "/tmp/npu-wifi-hwbytes.prev"
+				r0="0.0"; r1="0.0"; r2="0.0"; x0="0.0"; x1="0.0"; x2="0.0"
+				split(m, c)
+				have = ((getline line < pf) > 0)
+				close(pf)
+				if (have) {
+					n = split(line, a); pt = a[1]+0; dt = now - pt
+					if (pt > 0 && now <= pt) {
+						# same-second duplicate/concurrent call: replay the
+						# stored rates WITHOUT moving the baseline, so a
+						# double-polling frontend does not read 0 and reset
+						# the delta window every tick.
+						if (n >= 13) { r0=a[8]; r1=a[9]; r2=a[10]; x0=a[11]; x1=a[12]; x2=a[13] }
+						printf "%s %s %s %s %s %s\n", r0, r1, r2, x0, x1, x2
+						exit
+					}
+					if (pt > 0 && now > pt) {
+						for (b = 0; b < 3; b++) {
+							d = c[b+1] - a[2+b]
+							if (d < 0) d += 4294967296       # u32 wrap
+							if (d < 0 || d > 2147483648) d = 0   # sanity
+							mb[b] = d * 8 / dt / 1000000
+						}
+						r0=sprintf("%.1f",mb[0]); r1=sprintf("%.1f",mb[1]); r2=sprintf("%.1f",mb[2])
+						d=t0-a[5]; if(d<0)d=0; x0=sprintf("%.1f", d*8/dt/1000000)
+						d=t1-a[6]; if(d<0)d=0; x1=sprintf("%.1f", d*8/dt/1000000)
+						d=t2-a[7]; if(d<0)d=0; x2=sprintf("%.1f", d*8/dt/1000000)
+					}
+				}
+				printf "%d %.0f %.0f %.0f %.0f %.0f %.0f %s %s %s %s %s %s\n", now, c[1]+0, c[2]+0, c[3]+0, t0, t1, t2, r0, r1, r2, x0, x1, x2 > pf
+				printf "%s %s %s %s %s %s\n", r0, r1, r2, x0, x1, x2
+			}' /dev/null)
+		hwrx0=$(echo "$_hw"|awk '{print $1}'); hwrx1=$(echo "$_hw"|awk '{print $2}'); hwrx2=$(echo "$_hw"|awk '{print $3}')
+		hwtx0=$(echo "$_hw"|awk '{print $4}'); hwtx1=$(echo "$_hw"|awk '{print $5}'); hwtx2=$(echo "$_hw"|awk '{print $6}')
+	fi
+
 	# Per-band Tx PER (packet error rate) from mt76 debugfs — the consistent
 	# per-MPDU hardware error metric. Surfaced below as retry_pct because the
 	# station-dump ratio (per-MPDU tx_retries vs per-MSDU tx_packets) over-reads
@@ -898,7 +1001,7 @@ ${d}" ;;
 		pm2=$(printf '%s\n' "$dump2" | awk '/^Station/{print $2}' | tr '\n' '|' | sed 's/|$//')
 		_bn=$(awk -v m0="$pm0" -v m1="$pm1" -v m2="$pm2" '
 			function has(macs, eth,   n,arr,i,low){ if(macs=="")return 0; low=tolower(eth); n=split(macs,arr,"|"); for(i=1;i<=n;i++) if(arr[i]!=""&&index(low,tolower(arr[i]))>0)return 1; return 0 }
-			/^[0-9a-fA-F]+ BND /{ eth=""; match($0,/eth=[^ \t]+/); if(RSTART>0)eth=substr($0,RSTART+4,RLENGTH-4); if(has(m0,eth))c0++; else if(has(m1,eth))c1++; else if(has(m2,eth))c2++ }
+			/^[0-9a-fA-F]+ BND /{ eth=""; match($0,/eth=[^ \t]+/); if(RSTART>0)eth=substr($0,RSTART+4,RLENGTH-4); if(has(m0,eth))c0++; if(has(m1,eth))c1++; if(has(m2,eth))c2++ }
 			END{printf "%d %d %d", c0+0,c1+0,c2+0}' /sys/kernel/debug/ppe/bind 2>/dev/null)
 		bn0=$(echo "$_bn"|awk '{print $1}'); bn1=$(echo "$_bn"|awk '{print $2}'); bn2=$(echo "$_bn"|awk '{print $3}')
 	fi
@@ -944,11 +1047,11 @@ ${d}" ;;
 
 	local bands_json=""
 	for band_idx in 0 1 2; do
-		local dump tx_mbps rx_mbps band_per frames_ps air_mbps air_eff
+		local dump tx_mbps rx_mbps band_per frames_ps air_mbps air_eff hw_tx hw_rx
 		case "$band_idx" in
-			0) dump="$dump0"; tx_mbps="$tx0_mbps"; rx_mbps="$rx0_mbps"; band_per="$band_per_0"; frames_ps="$frames0"; air_mbps="$air0"; air_eff="$aireff0" ;;
-			1) dump="$dump1"; tx_mbps="$tx1_mbps"; rx_mbps="$rx1_mbps"; band_per="$band_per_1"; frames_ps="$frames1"; air_mbps="$air1"; air_eff="$aireff1" ;;
-			2) dump="$dump2"; tx_mbps="$tx2_mbps"; rx_mbps="$rx2_mbps"; band_per="$band_per_2"; frames_ps="$frames2"; air_mbps="$air2"; air_eff="$aireff2" ;;
+			0) dump="$dump0"; tx_mbps="$tx0_mbps"; rx_mbps="$rx0_mbps"; band_per="$band_per_0"; frames_ps="$frames0"; air_mbps="$air0"; air_eff="$aireff0"; hw_tx="$hwtx0"; hw_rx="$hwrx0" ;;
+			1) dump="$dump1"; tx_mbps="$tx1_mbps"; rx_mbps="$rx1_mbps"; band_per="$band_per_1"; frames_ps="$frames1"; air_mbps="$air1"; air_eff="$aireff1"; hw_tx="$hwtx1"; hw_rx="$hwrx1" ;;
+			2) dump="$dump2"; tx_mbps="$tx2_mbps"; rx_mbps="$rx2_mbps"; band_per="$band_per_2"; frames_ps="$frames2"; air_mbps="$air2"; air_eff="$aireff2"; hw_tx="$hwtx2"; hw_rx="$hwrx2" ;;
 		esac
 		[ -z "$dump" ] && continue
 
@@ -993,7 +1096,7 @@ ${d}" ;;
 			1) sta_tx_raw="$sta_tx1" ;;
 			2) sta_tx_raw="$sta_tx2" ;;
 		esac
-		bands_json="${bands_json}{\"band\":${band_idx},\"stations\":${1:-0},\"tx_packets\":${2:-0},\"tx_retries\":${3:-0},\"tx_failed\":${4:-0},\"avg_phy_rate\":${5:-0},\"retry_pct\":${6:-0},\"avg_signal\":${7:-0},\"min_signal\":${8:-0},\"tx_mbps\":${tx_mbps},\"rx_mbps\":${rx_mbps:-0},\"air_mbps\":${air_mbps:-0},\"air_eff\":${air_eff:-0},\"frames_ps\":${frames_ps:-0},\"tx_bytes_raw\":${sta_tx_raw:-0}}"
+		bands_json="${bands_json}{\"band\":${band_idx},\"stations\":${1:-0},\"tx_packets\":${2:-0},\"tx_retries\":${3:-0},\"tx_failed\":${4:-0},\"avg_phy_rate\":${5:-0},\"retry_pct\":${6:-0},\"avg_signal\":${7:-0},\"min_signal\":${8:-0},\"tx_mbps\":${tx_mbps},\"rx_mbps\":${rx_mbps:-0},\"air_mbps\":${air_mbps:-0},\"hw_tx_mbps\":${hw_tx:-0},\"hw_rx_mbps\":${hw_rx:-0},\"air_eff\":${air_eff:-0},\"frames_ps\":${frames_ps:-0},\"tx_bytes_raw\":${sta_tx_raw:-0}}"
 	done
 
 	printf '{"available":true,"mlo":%s,"bands":[%s]}' "$([ "$is_mld" = 1 ] && echo true || echo false)" "$bands_json"

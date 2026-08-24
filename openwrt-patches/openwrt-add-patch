@@ -23,6 +23,8 @@ package/kernel/mt76/patches/034-wifi-mt76-mt7996-reg_lock-irqsave-prevent-AP-pan
 package/kernel/mt76/patches/035-wifi-mt76-fix-unlocked-wcid-check-in-mt76_tx_status_skb_add.patch
 package/kernel/mt76/patches/036-wifi-mt76-fix-wcid-teardown-ordering-in-mt76_reset_device.patch
 package/kernel/mt76/patches/037-wifi-mt76-mt7996-fix-hwrro-delete-event-struct-size.patch
+038-wifi-mt76-mt7996-expose-per-link-sta-stats-debugfs.patch:package/kernel/mt76/patches/038-wifi-mt76-mt7996-expose-per-link-sta-stats-debugfs.patch
+039-wifi-mt76-mt7996-poll-adm-stat-under-npu-offload.patch:package/kernel/mt76/patches/039-wifi-mt76-mt7996-poll-adm-stat-under-npu-offload.patch
 package/network/config/wifi-scripts/files-ucode/usr/share/ucode/wifi/ap.uc
 package/network/config/wifi-scripts/files-ucode/usr/share/ucode/wifi/hostapd.uc
 package/network/services/hostapd/patches/015-mtk-hostapd-mtk-6G-band-does-not-require-DFS.patch

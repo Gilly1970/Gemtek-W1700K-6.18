@@ -1026,8 +1026,17 @@ function buildWifiBandTacho(bandIdx, ws, qType, bndCount, unbCount) {
 	// and pure-host-path both read right. No expected-throughput fallback (that reported link
 	// capability, not throughput, and showed a ghost value at idle on some mt76 builds).
 	var mbps = (ws.tx_mbps || 0) + (ws.rx_mbps || 0);
+	// HW-exact composite: per-band MAC MIB uplink bytes + fw per-station downlink
+	// bytes. Both survive NPU offload and cover MLO links, unlike the mac80211
+	// byte-rate above, so take whichever reads higher — still labelled "MBPS"
+	// because these are real byte counters, not estimates.
+	var hwMbps = (ws.hw_tx_mbps || 0) + (ws.hw_rx_mbps || 0);
+	if (hwMbps > mbps) mbps = hwMbps;
 	var mbpsEst = false;   // true when the reading is the airtime-derived estimate (offloaded)
-	if ((bndCount || 0) > 0 && (ws.air_mbps || 0) > mbps) { mbps = ws.air_mbps; mbpsEst = true; }
+	// Airtime estimate only takes over when it clearly exceeds the exact
+	// composite (the one remaining blind spot: an MLD's secondary-link downlink,
+	// which neither byte counter can attribute).
+	if ((bndCount || 0) > 0 && (ws.air_mbps || 0) > mbps * 1.25) { mbps = ws.air_mbps; mbpsEst = true; }
 	var retry = ws.retry_pct || 0;
 	var bnd   = bndCount || 0;
 	var sta   = ws.stations || 0;

@@ -1,0 +1,33 @@
+From: Gilly <gilroyscott1970@gmail.com>
+Date: Mon, 24 Aug 2026 00:00:00 +0000
+Subject: [PATCH] wifi: mt76: mt7996: poll ADM_STAT/MSDU_COUNT when NPU offload is active
+
+mt7996_mac_work() requests the per-wcid ALL_STA_INFO ADM_STAT (tx/rx
+bytes) and MSDU_COUNT (tx/rx packets) tags only while a WED device is
+active, on the reasoning that without hardware offload mac80211's own
+software counters are authoritative and the firmware poll is redundant.
+
+Airoha NPU offload bypasses the host exactly the way WED does: forwarded
+frames never traverse mac80211, so its software counters stall while the
+firmware keeps counting at the MAC. On an NPU board the gate leaves
+wcid->stats.{tx,rx}_bytes and {tx,rx}_packets permanently at zero (the
+unconditional TXRX_RATE poll is why the per-link rate still updates).
+
+Extend the gate with mt76_npu_device_active() so NPU builds collect the
+same firmware counters WED builds do. Two extra MCU queries per stats
+cycle, only when the NPU is actually attached.
+
+Signed-off-by: Gilly <gilroyscott1970@gmail.com>
+---
+--- a/mt7996/mac.c
++++ b/mt7996/mac.c
+@@ -2996,7 +2996,8 @@
+ 		mt7996_mac_update_stats(phy);
+ 
+ 		mt7996_mcu_get_all_sta_info(phy, UNI_ALL_STA_TXRX_RATE);
+-		if (mtk_wed_device_active(&phy->dev->mt76.mmio.wed)) {
++		if (mtk_wed_device_active(&phy->dev->mt76.mmio.wed) ||
++		    mt76_npu_device_active(&phy->dev->mt76)) {
+ 			mt7996_mcu_get_all_sta_info(phy, UNI_ALL_STA_TXRX_ADM_STAT);
+ 			mt7996_mcu_get_all_sta_info(phy, UNI_ALL_STA_TXRX_MSDU_COUNT);
+ 		}

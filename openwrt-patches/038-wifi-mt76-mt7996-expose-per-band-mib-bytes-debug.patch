@@ -1,0 +1,136 @@
+From: Gilly <gilroyscott1970@gmail.com>
+Date: Mon, 24 Aug 2026 00:00:00 +0000
+Subject: [PATCH] 038-wifi-mt76-mt7996-expose-per-band-mib-bytes-debugfs
+
+mt7996_mac_work() polls the per-wcid ADM_STAT and MSDU_COUNT firmware 
+counters only while a WED device is active, since without hardware offload 
+mac80211's software counters are authoritative. Airoha NPU offload bypasses 
+the host the same way, so on an NPU board wcid->stats bytes/packets stay 
+at zero. Extend the gate with mt76_npu_device_active() so NPU builds 
+collect the same firmware counters.
+
+The firmware accounting only reports an MLD's setup link, though. 
+The per-band MIB RX byte counters (MT_MIB_RSCR28/30), already accumulated 
+into phy->mib, count at the MAC — so they see offloaded traffic and cover 
+every link of an MLD station. Expose them via a read-only "band_bytes" 
+debugfs file, one section per active band, refreshing the MIB on read like 
+tx_stats. tx_mpdu_attempts/success are included so a monitor can poll one 
+file. Counters are u32 and wrap; use modular deltas.
+
+Signed-off-by: Gilly <gilroyscott1970@gmail.com>
+---
+ mt7996/debugfs.c | 79 ++++++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 79 insertions(+)
+
+diff --git a/mt7996/debugfs.c b/mt7996/debugfs.c
+index cd5d07e..5629800 100644
+--- a/mt7996/debugfs.c
++++ b/mt7996/debugfs.c
+@@ -604,6 +604,43 @@ mt7996_tx_stats_show(struct seq_file *file, void *data)
+ 
+ DEFINE_SHOW_ATTRIBUTE(mt7996_tx_stats);
+ 
++static void
++mt7996_band_bytes_show_phy(struct seq_file *file, struct mt7996_phy *phy)
++{
++	struct mt76_mib_stats *mib = &phy->mib;
++
++	mt7996_mac_update_stats(phy);
++
++	seq_printf(file, "Phy band %d\n", phy->mt76->band_idx);
++	seq_printf(file, "rx_ampdu_bytes: %u\n", mib->rx_ampdu_bytes_cnt);
++	seq_printf(file, "rx_ampdu_valid_subframe_bytes: %u\n",
++		   mib->rx_ampdu_valid_subframe_bytes_cnt);
++	seq_printf(file, "tx_mpdu_attempts: %u\n", mib->tx_mpdu_attempts_cnt);
++	seq_printf(file, "tx_mpdu_success: %u\n", mib->tx_mpdu_success_cnt);
++}
++
++static int
++mt7996_band_bytes_show(struct seq_file *file, void *data)
++{
++	struct mt7996_dev *dev = file->private;
++	struct mt7996_phy *phy = &dev->phy;
++
++	mutex_lock(&dev->mt76.mutex);
++
++	mt7996_band_bytes_show_phy(file, phy);
++	phy = mt7996_phy2(dev);
++	if (phy)
++		mt7996_band_bytes_show_phy(file, phy);
++	phy = mt7996_phy3(dev);
++	if (phy)
++		mt7996_band_bytes_show_phy(file, phy);
++
++	mutex_unlock(&dev->mt76.mutex);
++
++	return 0;
++}
++DEFINE_SHOW_ATTRIBUTE(mt7996_band_bytes);
++
+ static void
+ mt7996_hw_queue_read(struct seq_file *s, u32 size,
+ 		     const struct hw_queue_map *map)
+@@ -916,6 +953,8 @@ int mt7996_init_debugfs(struct mt7996_dev *dev)
+ 	debugfs_create_file("xmit-queues", 0400, dir, dev,
+ 			    &mt7996_xmit_queues_fops);
+ 	debugfs_create_file("tx_stats", 0400, dir, dev, &mt7996_tx_stats_fops);
++	debugfs_create_file("band_bytes", 0400, dir, dev,
++			    &mt7996_band_bytes_fops);
+ 	debugfs_create_file("sys_recovery", 0600, dir, dev,
+ 			    &mt7996_sys_recovery_ops);
+ 	debugfs_create_file("fw_debug_wm", 0600, dir, dev, &fops_fw_debug_wm);
+@@ -1104,11 +1143,51 @@ static const struct file_operations fops_fixed_rate = {
+ 	.llseek = default_llseek,
+ };
+ 
++static int
++mt7996_link_sta_stats_show(struct seq_file *s, void *data)
++{
++	struct ieee80211_link_sta *link_sta = s->private;
++	struct mt7996_sta *msta = (struct mt7996_sta *)link_sta->sta->drv_priv;
++	struct mt7996_sta_link *msta_link;
++	struct mt76_sta_stats *stats;
++	struct rate_info rate;
++	u32 tx_packets, rx_packets;
++	u64 tx_bytes, rx_bytes;
++
++	rcu_read_lock();
++
++	msta_link = mt7996_sta_link(msta, link_sta->link_id);
++	if (!msta_link) {
++		rcu_read_unlock();
++		return -ENODATA;
++	}
++
++	stats = &msta_link->wcid.stats;
++	tx_bytes = stats->tx_bytes;
++	rx_bytes = stats->rx_bytes;
++	tx_packets = stats->tx_packets;
++	rx_packets = stats->rx_packets;
++	rate = msta_link->wcid.rate;
++
++	rcu_read_unlock();
++
++	seq_printf(s, "tx_bytes: %llu\n", tx_bytes);
++	seq_printf(s, "rx_bytes: %llu\n", rx_bytes);
++	seq_printf(s, "tx_packets: %u\n", tx_packets);
++	seq_printf(s, "rx_packets: %u\n", rx_packets);
++	seq_printf(s, "tx_rate_100kbps: %u\n", cfg80211_calculate_bitrate(&rate));
++
++	return 0;
++}
++DEFINE_SHOW_ATTRIBUTE(mt7996_link_sta_stats);
++
+ void mt7996_link_sta_add_debugfs(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
+ 				 struct ieee80211_link_sta *link_sta,
+ 				 struct dentry *dir)
+ {
+ 	debugfs_create_file("fixed_rate", 0600, dir, link_sta, &fops_fixed_rate);
++	debugfs_create_file("stats", 0400, dir, link_sta,
++			    &mt7996_link_sta_stats_fops);
+ }
+ 
+ #endif
+-- 
+2.43.0
+
