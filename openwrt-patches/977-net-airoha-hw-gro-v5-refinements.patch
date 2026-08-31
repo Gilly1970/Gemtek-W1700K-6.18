@@ -1,0 +1,70 @@
+From: Lorenzo Bianconi <lorenzo@kernel.org>
+Date: Sun, 31 Aug 2026 00:00:00 +0000
+Subject: [PATCH] net: airoha: HW GRO v5 refinements
+
+Remaining deltas of the net-next v5 "add HW GRO offload support"
+series vs what this tree already carries (916-02 + 920-xx rework +
+975 NETIF_F_GRO_HW migration):
+
+1. Validate the hardware-reported aggregate count against
+   AIROHA_RXQ_LRO_MAX_AGG_COUNT before building the LRO skb, so a
+   bogus msg2 can't produce garbage gso_segs/gso_size. Moved the
+   read before any skb allocation to keep the error path leak-free.
+2. Only patch the TCP timestamp echo reply (TSecr) into the header
+   when the descriptor field is non-zero: the field is pre-zeroed in
+   the posted descriptor, so non-zero means the hardware actually
+   populated it. Previously a zero would clobber a valid TSecr.
+3. Disable the FE LRO engine in ndo_stop when the device has
+   NETIF_F_GRO_HW enabled, so stale FE LRO state can't outlive the
+   netdev and spuriously -EBUSY a later open of another device
+   sharing the QDMA.
+---
+--- a/drivers/net/ethernet/airoha/airoha_eth.c
++++ b/drivers/net/ethernet/airoha/airoha_eth.c
+@@ -739,6 +739,10 @@ static struct sk_buff *airoha_qdma_lro_r
+ 	l2_len = FIELD_GET(QDMA_ETH_RXMSG_L2_LEN_MASK, msg2);
+ 	len = FIELD_GET(QDMA_DESC_LEN_MASK, desc_ctrl);
+ 
++	agg_count = FIELD_GET(QDMA_ETH_RXMSG_AGG_COUNT_MASK, msg2);
++	if (agg_count > AIROHA_RXQ_LRO_MAX_AGG_COUNT)
++		return NULL;
++
+ 	if (ipv4) {
+ 		struct iphdr *iph;
+ 
+@@ -814,7 +818,15 @@ static struct sk_buff *airoha_qdma_lro_r
+ 			u8 *ptr = (u8 *)th + sizeof(*th) + 2 * sizeof(__be32);
+ 			__le32 tcp_ts_reply = READ_ONCE(desc->tcp_ts_reply);
+ 
+-			put_unaligned_be32(le32_to_cpu(tcp_ts_reply), ptr);
++			/* The field is pre-zeroed in the posted descriptor,
++			 * so a non-zero value is the hardware confirming the
++			 * timestamp echo reply is valid. Leave TSecr
++			 * untouched otherwise, since the hardware may not
++			 * populate it for every aggregate.
++			 */
++			if (tcp_ts_reply)
++				put_unaligned_be32(le32_to_cpu(tcp_ts_reply),
++						   ptr);
+ 		}
+ 	}
+ 
+@@ -845,7 +857,6 @@ static struct sk_buff *airoha_qdma_lro_r
+ 			q->buf_size);
+ 
+ 	shinfo->gso_type = ipv4 ? SKB_GSO_TCPV4 : SKB_GSO_TCPV6;
+-	agg_count = FIELD_GET(QDMA_ETH_RXMSG_AGG_COUNT_MASK, msg2);
+ 	shinfo->gso_size = DIV_ROUND_UP(data_len, agg_count);
+ 	shinfo->gso_segs = agg_count;
+ 
+@@ -2213,6 +2224,10 @@ static int airoha_dev_stop(struct net_de
+ 		airoha_set_gdm_port_fwd_cfg(qdma->eth,
+ 					    REG_GDM_FWD_CFG(port->id),
+ 					    FE_PSE_PORT_DROP);
++
++	if (netdev->features & NETIF_F_GRO_HW)
++		airoha_fe_lro_disable(qdma->eth, qdma - &dev->eth->qdma[0]);
++
+ 	airoha_qdma_stop(qdma);
+ 	airoha_update_netdev_features(dev);
+ 

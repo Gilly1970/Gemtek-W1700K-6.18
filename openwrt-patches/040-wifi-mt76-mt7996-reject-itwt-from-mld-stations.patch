@@ -1,0 +1,30 @@
+From 074472e615e94db31e23d0fef4a9ca9b085f5ce1 Mon Sep 17 00:00:00 2001
+From: Howard Hsu <howard-yh.hsu@mediatek.com>
+Subject: [PATCH] wifi: mt76: mt7996: reject iTWT setup requests from MLD stations
+
+The firmware does not support individual TWT agreements with non-AP MLDs,
+and the driver only tracks TWT flow state on the default link, which may
+not be the link the agreement was negotiated on. Reject TWT setup
+requests from MLD stations instead of programming an unsupported
+configuration.
+
+Backported from openwrt/mt76 master 074472e6 (2026-07-27 nbd series,
+landed after our 2c84469c pin). Drop at next mt76 bump past 074472e6.
+
+Signed-off-by: Howard Hsu <howard-yh.hsu@mediatek.com>
+---
+--- a/mt7996/mac.c
++++ b/mt7996/mac.c
+@@ -3227,6 +3227,12 @@
+ 	struct mt7996_twt_flow *flow;
+ 	u8 flowid, table_id, exp;
+ 
++	/* the firmware does not support iTWT agreements with MLD peers, and
++	 * driver TWT state is only tracked on the default link
++	 */
++	if (sta->mlo)
++		goto out;
++
+ 	if (mt7996_mac_check_twt_req(twt))
+ 		goto out;
+ 

@@ -1,0 +1,26 @@
+From: Lorenzo Bianconi <lorenzo@kernel.org>
+Date: Sun, 31 Aug 2026 00:00:00 +0000
+Subject: [PATCH] net: airoha: enable RX_DONE interrupt for RX queue 31
+
+RX_IRQ1_BANK_PIN_MASK maps rx queues 21-30 to IRQ bank 1 but misses
+BIT(31), so rx queue 31 never has its RX_DONE interrupt routed to an
+IRQ bank. With the HW GRO offload moving the LRO-capable rx queues to
+the high range (24-31), traffic hashed to queue 31 would fill the ring
+and stall with no completion interrupt. Add BIT(31) to the bank 1 pin
+mask.
+
+Companion fix to the net-next v5 "add HW GRO offload support" series;
+in this tree it complements 916-02 + 975 which already implement the
+same LRO queue layout.
+---
+--- a/drivers/net/ethernet/airoha/airoha_eth.h
++++ b/drivers/net/ethernet/airoha/airoha_eth.h
+@@ -538,7 +538,7 @@ struct airoha_wdma_info {
+ 
+ /* RX queue to IRQ mapping: BIT(q) in IRQ(n) */
+ #define RX_IRQ0_BANK_PIN_MASK			0x839f
+-#define RX_IRQ1_BANK_PIN_MASK			0x7fe00000
++#define RX_IRQ1_BANK_PIN_MASK			0xffe00000
+ #define RX_IRQ2_BANK_PIN_MASK			0x20
+ #define RX_IRQ3_BANK_PIN_MASK			0x40
+ #define RX_IRQ_BANK_PIN_MASK(_n)		\
