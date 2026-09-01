@@ -1,0 +1,73 @@
+From: mt76 fixes "wifi: mt76: use ALTX queue for packets to disassociated stations"
+Date: Tue, 1 Sep 2026 00:00:00 +0000
+Subject: [PATCH] wifi: mt76: use ALTX queue for packets to disassociated stations
+
+Staged 2026-09-01 from a raw "mt76 fixes" diff (author not recorded). NOT
+merged in openwrt/mt76, nbd168/wireless, or mainline as of 2026-09-01 -
+re-check on each mt76 bump and drop once it lands. REQUIRES 042 (Peter Chiu
+"fix queue assignment for disassoc packets"): this patch's tx.c context
+includes that line (fuzz 2 without it, fuzz 0 with it).
+
+Clear MT_WCID_TX_INFO_SET when a station is torn down (mt7996 last-link
+DISASSOC, both mt7915 drop paths) and, in mt76_txq_schedule_pending_wcid(),
+route any non-data management frame for a wcid WITHOUT TX_INFO_SET to
+MT_TXQ_PSD (ALTX) instead of the per-station buffered path. Bufferable
+management frames (deauth/disassoc/action) for a torn-down or power-saving
+station otherwise sit in a tx queue with other buffered frames, filling
+hardware queues that are only released once the WTBL slot is reused.
+
+Safe on W1700K: TX_INFO_SET is set only after CONN_STATE_CONNECT + rate
+control in the ASSOC event (mt7996/main.c ~1414); auth/assoc-resp are
+non-bufferable and already use PSD; global_wcid and each vif wcid have the
+flag from init/add_interface so broadcast and vif frames are unaffected.
+The mt7996 hunk lands next to our 027/033 DISASSOC code without conflict.
+Candidate fix for HW-queue / token-pool leaks after client disconnects.
+Paths rewritten from drivers/net/wireless/mediatek/mt76/ to package root.
+
+---
+diff --git a/mt7915/main.c b/mt7915/main.c
+index a8286f8becf9..a03d89aabe80 100644
+--- a/mt7915/main.c
++++ b/mt7915/main.c
+@@ -805,6 +805,7 @@ __mt7915_drop_sta(void *ptr, u8 *mac, struct ieee80211_vif *vif)
+ 
+ 	msta = (struct mt7915_sta *)sta->drv_priv;
+ 	mt7915_mcu_add_sta(data->dev, vif, sta, CONN_STATE_DISCONNECT, false);
++	msta->wcid.tx_info &= ~MT_WCID_TX_INFO_SET;
+ 	msta->wcid.sta_disabled = 1;
+ 	msta->wcid.sta = 0;
+ }
+@@ -871,6 +872,7 @@ int mt7915_mac_sta_event(struct mt76_dev *mdev, struct ieee80211_vif *vif,
+ 		mutex_unlock(&dev->mt76.mutex);
+ 
+ 		mt7915_mcu_add_sta(dev, vif, sta, CONN_STATE_DISCONNECT, false);
++		msta->wcid.tx_info &= ~MT_WCID_TX_INFO_SET;
+ 		msta->wcid.sta_disabled = 1;
+ 		msta->wcid.sta = 0;
+ 		return 0;
+diff --git a/mt7996/main.c b/mt7996/main.c
+index d17d1dbb2038..dd7a01c02a7c 100644
+--- a/mt7996/main.c
++++ b/mt7996/main.c
+@@ -1433,6 +1433,7 @@ mt7996_mac_sta_event(struct mt7996_dev *dev, struct ieee80211_vif *vif,
+ 			else if (sta->mlo && links == BIT(link_id)) /* last link */
+ 				mt7996_mcu_teardown_mld_sta(dev, link,
+ 							    msta_link);
++			msta_link->wcid.tx_info &= ~MT_WCID_TX_INFO_SET;
+ 			msta_link->wcid.sta_disabled = 1;
+ 			msta_link->wcid.sta = 0;
+ 			links = links & ~BIT(link_id);
+diff --git a/tx.c b/tx.c
+index b1e894b19cbd..3c623df2e741 100644
+--- a/tx.c
++++ b/tx.c
+@@ -680,7 +680,8 @@ mt76_txq_schedule_pending_wcid(struct mt76_phy *phy, struct mt76_wcid *wcid,
+ 		if ((dev->drv->drv_flags & MT_DRV_HW_MGMT_TXQ) &&
+ 		    !(info->flags & IEEE80211_TX_CTL_HW_80211_ENCAP) &&
+ 		    !ieee80211_is_data_present(hdr->frame_control) &&
+-		    (!ieee80211_is_bufferable_mmpdu(skb) ||
++		    (!(wcid->tx_info & MT_WCID_TX_INFO_SET) ||
++		     !ieee80211_is_bufferable_mmpdu(skb) ||
+ 		     ieee80211_is_deauth(hdr->frame_control) ||
+ 		     ieee80211_is_disassoc(hdr->frame_control) ||
+ 		     head == &wcid->tx_offchannel))

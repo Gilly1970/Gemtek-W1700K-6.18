@@ -1,0 +1,97 @@
+From: Vitaliy Sochnev
+Date: Tue, 1 Sep 2026 00:00:00 +0000
+Subject: [PATCH] net: airoha: handle RX_NO_CPU_DSCP interrupt, not just RX_DONE
+
+airoha_qdma_hw_init() unmasks the per-ring NO_CPU_DSCP interrupt, which
+fires when an RX ring runs out of free CPU descriptors, but
+airoha_irq_handler() only extracts the RX_DONE bits from the same status
+word. The NO_CPU_DSCP bits are acknowledged and dropped.
+
+Once a ring is drained to zero posted descriptors no further RX_DONE can
+fire for it - nothing is left for hw to receive into - so NAPI is never
+rescheduled, airoha_qdma_fill_rx_queue() is never called again, and the
+ring stays dead until the interface is reconfigured.
+
+This is reachable on RX ring 4, which airoha_fe_vip_setup() force-routes
+~15 VIP-classified protocols onto (BOOTP, PPPoE Discovery, ISAKMP,
+DHCPv6, SIP, LLDP, PPP LCP/IPCP/CHAP/PAP/IPv6CP, ...) while it sits on
+the 16-descriptor RX_DSCP_NUM() default. A DHCP renewal or a PPPoE
+negotiation burst drains it faster than the CPU reposts, after which all
+of those protocols silently stop being received.
+
+Treat NO_CPU_DSCP like RX_DONE for scheduling NAPI:
+airoha_qdma_rx_process() already calls airoha_qdma_fill_rx_queue()
+unconditionally at the end of every poll, so scheduling NAPI is enough
+to make an emptied ring refill itself. Re-enable the bit alongside
+RX_DONE in airoha_qdma_rx_napi_poll() so it is not left masked after
+first use.
+
+Whether NO_CPU_DSCP re-latches while the ring is still empty is not
+documented. If it does, a ring that cannot be refilled (page_pool
+returning NULL) keeps reasserting it. Masking it until a refill succeeds
+is worse: a starved ring never fires RX_DONE either, so it would stay
+dead after the memory pressure clears.
+
+Fixes: f252493e1835 ("net: airoha: Enable multiple IRQ lines support in airoha_eth driver.")
+Link: https://github.com/openwrt/openwrt/issues/24715
+Acked-by: Lorenzo Bianconi <lorenzo@kernel.org>
+Signed-off-by: Vitaliy Sochnev <sochnev.v.74@gmail.com>
+
+---
+diff -ruN s0/drivers/net/ethernet/airoha/airoha_eth.c s1/drivers/net/ethernet/airoha/airoha_eth.c
+--- a/drivers/net/ethernet/airoha/airoha_eth.c
++++ b/drivers/net/ethernet/airoha/airoha_eth.c
+@@ -1017,13 +1017,16 @@
+ 		int i, qid = q - &qdma->q_rx[0];
+ 		int intr_reg = qid < RX_DONE_HIGH_OFFSET ? QDMA_INT_REG_IDX1
+ 							 : QDMA_INT_REG_IDX2;
++		u32 irq_id = qid % RX_DONE_HIGH_OFFSET;
++		u32 intr_mask = BIT(irq_id) |
++				BIT(irq_id + RX_NO_CPU_DSCP_LOW_OFFSET);
+ 
+ 		for (i = 0; i < ARRAY_SIZE(qdma->irq_banks); i++) {
+ 			if (!(BIT(qid) & RX_IRQ_BANK_PIN_MASK(i)))
+ 				continue;
+ 
+ 			airoha_qdma_irq_enable(&qdma->irq_banks[i], intr_reg,
+-					       BIT(qid % RX_DONE_HIGH_OFFSET));
++					       intr_mask);
+ 		}
+ 	}
+ 
+@@ -1674,16 +1677,19 @@
+ 	if (!test_bit(DEV_STATE_INITIALIZED, &qdma->eth->state))
+ 		return IRQ_NONE;
+ 
+-	rx_intr1 = intr[1] & RX_DONE_LOW_INT_MASK;
++	rx_intr1 = intr[1] & (RX_DONE_LOW_INT_MASK | RX_NO_CPU_DSCP_LOW_INT_MASK);
+ 	if (rx_intr1) {
+ 		airoha_qdma_irq_disable(irq_bank, QDMA_INT_REG_IDX1, rx_intr1);
+-		rx_intr_mask |= rx_intr1;
++		rx_intr_mask |= (rx_intr1 & RX_DONE_LOW_INT_MASK) |
++				RX_NO_CPU_DSCP_INT_RX1_MASK(rx_intr1);
+ 	}
+ 
+-	rx_intr2 = intr[2] & RX_DONE_HIGH_INT_MASK;
++	rx_intr2 = intr[2] & (RX_DONE_HIGH_INT_MASK | RX_NO_CPU_DSCP_HIGH_INT_MASK);
+ 	if (rx_intr2) {
+ 		airoha_qdma_irq_disable(irq_bank, QDMA_INT_REG_IDX2, rx_intr2);
+-		rx_intr_mask |= (rx_intr2 << 16);
++		rx_intr_mask |= ((rx_intr2 & RX_DONE_HIGH_INT_MASK) <<
++				 RX_DONE_HIGH_OFFSET) |
++				(rx_intr2 & RX_NO_CPU_DSCP_HIGH_INT_MASK);
+ 	}
+ 
+ 	for (i = 0; rx_intr_mask && i < ARRAY_SIZE(qdma->q_rx); i++) {
+diff -ruN s0/drivers/net/ethernet/airoha/airoha_regs.h s1/drivers/net/ethernet/airoha/airoha_regs.h
+--- a/drivers/net/ethernet/airoha/airoha_regs.h
++++ b/drivers/net/ethernet/airoha/airoha_regs.h
+@@ -575,6 +575,8 @@
+ #define INT_RX1_MASK(_n)							\
+ 	((((_n) << RX_NO_CPU_DSCP_LOW_OFFSET) & RX_NO_CPU_DSCP_LOW_INT_MASK) |	\
+ 	 (RX_DONE_LOW_INT_MASK & (_n)))
++#define RX_NO_CPU_DSCP_INT_RX1_MASK(_n)					\
++	(((_n) & RX_NO_CPU_DSCP_LOW_INT_MASK) >> RX_NO_CPU_DSCP_LOW_OFFSET)
+ 
+ /* QDMA_CSR_INT_ENABLE3 */
+ #define RX31_NO_CPU_DSCP_INT_MASK	BIT(31)

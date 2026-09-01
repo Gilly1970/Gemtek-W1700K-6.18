@@ -1,0 +1,40 @@
+From: Vitaliy Sochnev
+Date: Tue, 1 Sep 2026 00:00:00 +0000
+Subject: [PATCH] net: airoha: grow the small RX rings
+
+Raise the RX_DSCP_NUM() fallback from 16 to 32, the vendor SDK default,
+and give ring 4 the 128 descriptors already used for rings 2/11/15.
+
+Ring 4 is the shared "force to CPU" ring that airoha_fe_vip_setup()
+routes BOOTP, PPPoE Discovery, PPP LCP/IPCP/CHAP/PAP/IPv6CP, ISAKMP,
+DHCPv6, SIP and LLDP onto, so it sees the same bursty non-hashed traffic
+as the rings already on 128 while sitting on the smallest allowance.
+
+At 16 descriptors the completion stall handled by the previous patch is
+readily reachable: on a Nokia XG-040G-MF the recovery fires roughly every 35 s 
+under repeated PPPoE dial-up, and negotiation never completes. At 128 it 
+did not trigger once across 500 forced PPPoE reconnects over 20 h.
+
+Ring 4 and the VIP classification feeding it are shared driver-wide, with
+no DT or hardware property distinguishing one variant's ring 4 from
+another's, so this is not scoped to a particular SoC.
+
+Fixes: 23020f049327 ("net: airoha: Introduce ethernet support for EN7581 SoC")
+Signed-off-by: Vitaliy Sochnev <sochnev.v.74@gmail.com>
+
+---
+diff -ruN s2/drivers/net/ethernet/airoha/airoha_eth.h s3/drivers/net/ethernet/airoha/airoha_eth.h
+--- a/drivers/net/ethernet/airoha/airoha_eth.h
++++ b/drivers/net/ethernet/airoha/airoha_eth.h
+@@ -41,9 +41,10 @@
+ #define TX_DSCP_NUM			1024
+ #define RX_DSCP_NUM(_n)			\
+ 	((_n) ==  2 ? 128 :		\
++	 (_n) ==  4 ? 128 :		\
+ 	 (_n) == 11 ? 128 :		\
+ 	 (_n) == 15 ? 128 :		\
+-	 (_n) ==  0 ? 1024 : 16)
++	 (_n) ==  0 ? 1024 : 32)
+ 
+ #define AIROHA_LRO_PAGE_ORDER		order_base_2(SZ_16K / PAGE_SIZE)
+ #define AIROHA_MAX_NUM_LRO_QUEUES	8
