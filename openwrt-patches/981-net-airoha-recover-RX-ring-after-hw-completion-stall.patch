@@ -1,40 +1,35 @@
-From: Vitaliy Sochnev
+From: netdev "[PATCH net v2 2/3] net: airoha: recover RX ring after hw completion stall"
 Date: Tue, 1 Sep 2026 00:00:00 +0000
 Subject: [PATCH] net: airoha: recover RX ring after hw completion stall
 
-On AN7583 hw can stop advancing the descriptor the sequential consumer in
-airoha_qdma_rx_process() is waiting on, while its own completion counter
-keeps moving. The ring is then dead: NAPI is scheduled, finds DONE clear
-at q->tail, and does nothing, forever.
+Staged 2026-09-01 from a netdev "[PATCH net v2 N/3]" airoha RX series (raw diff
+only; author not recorded). NOT merged in torvalds/linux, stable, or OpenWrt
+master as of 2026-09-01 - re-check on each master sync and drop once it lands.
+Regenerated against this tree's effective airoha_eth source (0 fuzz/offset) and
+cross-compiled clean (no warnings) against a built 6.18.44 on 2026-09-01.
 
-Observed directly on ring 4 at its 16-descriptor default (devmem, qdma0):
-REG_RX_CPU_IDX frozen at 15 for over an hour while REG_RX_DMA_IDX 
-advanced 29 -> 96, with a 60-byte frame left stranded in the ring.
-QDMA_DESC_DROP_MASK was never set. In practice this is hit during PPPoE
-negotiation bursts on the shared "force to CPU" ring, where it stops the
-dial-up from ever completing.
+Rebased onto this tree: (1) #include block differs (920-xx/975 extra
+includes), (2) airoha_qdma_cleanup() has the 957-restructured signature
+(struct airoha_qdma *qdma only, no DEV_STATE block) - cancel_work_sync()
+inserted at its top. All other hunks land as upstream.
 
-Detect it without trusting ring content: REG_RX_DMA_IDX is hw's own
-counter, independent of what sw posted. If it advances across polls while
-q->tail does not, hw is making progress the consumer cannot observe. Idle
-rings, where hw does not advance either, are left alone. An earlier
-version scanned the ring for a DONE descriptor and trusted its content;
-that OOMed once it reached uninitialised DMA memory that happened to have
-the bit set. A register cannot misfire that way.
+On every "next descriptor not DONE" break, compare q->tail against the
+hardware's own REG_RX_DMA_IDX. If hw keeps advancing while the strictly
+sequential consumer is stuck for AIROHA_RX_STALL_THRESHOLD (3) polls, a
+per-QDMA work disables that NAPI, pauses RX DMA (poll BUSY <= 50 ms),
+drains + refills the ring, re-enables, and logs
+"qid=%d RX ring recovered after hw stall (RX DMA paused %lld us)".
+disable_work_sync() in stop_napi, cancel_work_sync() in cleanup, INIT_WORK
+for every qdma[] before the init loop (error path tears down all).
 
-Recovery is deferred to a work item, since the register access can sleep.
-It drops what is in flight and re-arms the ring through the existing
-cleanup_rx_queue()/fill_rx_queue() pair, which only touch the sw-owned
-[tail, head) window and rewrite both indices from it. Trying instead to
-identify and keep the descriptor hw used caused a page_pool double free.
+Safe with 975 LRO/scatter (DONE is set per descriptor in order; rx_process
+consumes MORE-chained descriptors one at a time). Known-benign race vs
+957: the work may re-set RX_DMA_EN after airoha_qdma_stop() dropped users
+to 0 (GDM ports down, TX DMA off, next open sets both). A FALSE positive
+costs <= 50 ms RX pause on that QDMA + the flush of that ring's queued
+packets, and is visible in dmesg - check after flashing:
+  dmesg | grep -E 'RX ring recovered|RX DMA busy'
 
-GLOBAL_CFG_RX_DMA_EN_MASK is per-QDMA, not per-ring, so this briefly
-pauses every ring behind that instance; there is no per-ring equivalent.
-The measured pause is 986-1131 us over 13 recoveries, not the 50 ms
-read_poll_timeout() ceiling, so the logged value is worth having.
-
-Fixes: 23020f049327 ("net: airoha: Introduce ethernet support for EN7581 SoC")
-Signed-off-by: Vitaliy Sochnev <sochnev.v.74@gmail.com>
 ---
 diff -ruN s1/drivers/net/ethernet/airoha/airoha_eth.c s2/drivers/net/ethernet/airoha/airoha_eth.c
 --- a/drivers/net/ethernet/airoha/airoha_eth.c

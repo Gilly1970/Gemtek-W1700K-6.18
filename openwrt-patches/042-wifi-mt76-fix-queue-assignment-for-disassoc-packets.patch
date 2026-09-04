@@ -21,17 +21,15 @@ upstream staging tree, 2026-07-27). NOT in openwrt/mt76 (tx.c history checked)
 nor in our pin 2c84469c. Prerequisite for 043 (its tx.c context includes this
 line). Paths rewritten from drivers/net/wireless/mediatek/mt76/ to package
 root. Drop when a mt76 bump brings it.]
----
- tx.c | 1 +
- 1 file changed, 1 insertion(+)
 
-diff --git a/tx.c b/tx.c
-index dc8407be2891..b03be0eb4712 100644
+Rebased 2026-09-03 on top of upstream 0898393ee0 ("wifi: mt76: use ALTX queue for
+packets to disassociated stations", = our former 043) for the mt76 be5ce791 bump.
+---
 --- a/tx.c
 +++ b/tx.c
-@@ -631,6 +631,7 @@ mt76_txq_schedule_pending_wcid(struct mt76_phy *phy, struct mt76_wcid *wcid,
- 		    !ieee80211_is_data_present(hdr->frame_control) &&
- 		    (!ieee80211_is_bufferable_mmpdu(skb) ||
+@@ -695,6 +695,7 @@
+ 		    (!(wcid->tx_info & MT_WCID_TX_INFO_SET) ||
+ 		     !ieee80211_is_bufferable_mmpdu(skb) ||
  		     ieee80211_is_deauth(hdr->frame_control) ||
 +		     ieee80211_is_disassoc(hdr->frame_control) ||
  		     head == &wcid->tx_offchannel))

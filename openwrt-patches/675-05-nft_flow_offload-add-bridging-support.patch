@@ -15,9 +15,18 @@ and makes nft_flow_offload_eval() dispatch bridging vs routing.
 
 Depends on 675-01 (br_fdb_find_rcu export) and 675-03 (DEV_PATH_MTK_WDMA).
 
---- a/include/net/netfilter/nf_flow_table.h	2026-08-02 22:13:26.441071143 +1000
-+++ b/include/net/netfilter/nf_flow_table.h	2026-08-02 22:13:26.459071732 +1000
-@@ -227,6 +227,10 @@
+Rebased 2026-09-03 for kernel 6.18.45+ (stable 25d40cf9 "netfilter: flowtable:
+consolidate xmit path" + follow-up): upstream nft_flow_route() now resolves the
+forward path per direction (XMIT_NEIGH each side independently) and
+nft_dev_forward_path() records out.ifindex whenever outdev resolves, which the
+consolidated NEIGH xmit path consumes as tuple->ifidx. Both nft_flow_route()
+and nft_flow_route_bridging() keep the -ENOENT-on-failure semantics but in the
+new per-direction form. Does NOT apply to 6.18.44; the previous copy does.
+
+diff -ruN base49/include/net/netfilter/nf_flow_table.h new49/include/net/netfilter/nf_flow_table.h
+--- a/include/net/netfilter/nf_flow_table.h	2026-09-03 00:47:43.443002080 +1000
++++ b/include/net/netfilter/nf_flow_table.h	2026-09-03 00:49:03.054762840 +1000
+@@ -228,6 +228,10 @@
  int nft_flow_route(const struct nft_pktinfo *pkt, const struct nf_conn *ct,
  		   struct nf_flow_route *route, enum ip_conntrack_dir dir,
  		   struct nft_flowtable *ft);
@@ -28,26 +37,9 @@ Depends on 675-01 (br_fdb_find_rcu export) and 675-03 (DEV_PATH_MTK_WDMA).
  
  static inline int
  nf_flow_table_offload_add_cb(struct nf_flowtable *flow_table,
---- a/net/netfilter/nft_flow_offload.c	2026-08-02 22:13:26.464071896 +1000
-+++ b/net/netfilter/nft_flow_offload.c	2026-08-02 22:13:26.465071928 +1000
-@@ -105,8 +105,13 @@
- 		goto out;
- 
- 	dir = CTINFO2DIR(ctinfo);
--	if (nft_flow_route(pkt, ct, &route, dir, priv->flowtable) < 0)
--		goto err_flow_route;
-+	if (nft_flow_offload_is_bridging(pkt->skb)) {
-+		if (nft_flow_route_bridging(pkt, ct, &route, dir, priv->flowtable) < 0)
-+			goto err_flow_route;
-+	} else {
-+		if (nft_flow_route(pkt, ct, &route, dir, priv->flowtable) < 0)
-+			goto err_flow_route;
-+	}
- 
- 	flow = flow_offload_alloc(ct);
- 	if (!flow)
---- a/net/netfilter/nf_flow_table_path.c	2026-08-02 22:13:26.466071961 +1000
-+++ b/net/netfilter/nf_flow_table_path.c	2026-08-02 22:13:26.466071961 +1000
+diff -ruN base49/net/netfilter/nf_flow_table_path.c new49/net/netfilter/nf_flow_table_path.c
+--- a/net/netfilter/nf_flow_table_path.c	2026-09-03 00:47:43.536005304 +1000
++++ b/net/netfilter/nf_flow_table_path.c	2026-09-03 00:49:03.070763395 +1000
 @@ -14,6 +14,7 @@
  #include <net/netfilter/nf_conntrack_core.h>
  #include <net/netfilter/nf_conntrack_extend.h>
@@ -151,7 +143,7 @@ Depends on 675-01 (br_fdb_find_rcu export) and 675-03 (DEV_PATH_MTK_WDMA).
  			break;
  		}
  	}
-@@ -193,22 +230,43 @@
+@@ -193,17 +230,38 @@
  	return found;
  }
  
@@ -194,13 +186,16 @@ Depends on 675-01 (br_fdb_find_rcu export) and 675-03 (DEV_PATH_MTK_WDMA).
  	if (nft_dev_fill_forward_path(route, dst, ct, dir, ha, &stack) >= 0)
  		nft_dev_path_info(&stack, &info, ha, &ft->data);
  
+@@ -211,7 +269,7 @@
+ 		route->tuple[dir].out.ifindex = info.outdev->ifindex;
+ 
  	if (!info.indev || !nft_flowtable_find_dev(info.indev, ft))
 -		return;
 +		return -ENOENT;
  
  	route->tuple[!dir].in.ifindex = info.indev->ifindex;
  	for (i = 0; i < info.num_encaps; i++) {
-@@ -225,6 +283,8 @@
+@@ -227,6 +285,8 @@
  		route->tuple[dir].out.hw_ifindex = info.hw_outdev->ifindex;
  		route->tuple[dir].xmit_type = info.xmit_type;
  	}
@@ -209,16 +204,20 @@ Depends on 675-01 (br_fdb_find_rcu export) and 675-03 (DEV_PATH_MTK_WDMA).
  }
  
  int nft_flow_route(const struct nft_pktinfo *pkt, const struct nf_conn *ct,
-@@ -271,10 +331,86 @@
+@@ -271,11 +331,87 @@
+ 	nft_default_forward_path(route, this_dst, dir);
+ 	nft_default_forward_path(route, other_dst, !dir);
  
- 	if (route->tuple[dir].xmit_type	== FLOW_OFFLOAD_XMIT_NEIGH &&
- 	    route->tuple[!dir].xmit_type == FLOW_OFFLOAD_XMIT_NEIGH) {
+-	if (route->tuple[dir].xmit_type	== FLOW_OFFLOAD_XMIT_NEIGH)
 -		nft_dev_forward_path(route, ct, dir, ft);
+-	if (route->tuple[!dir].xmit_type == FLOW_OFFLOAD_XMIT_NEIGH)
 -		nft_dev_forward_path(route, ct, !dir, ft);
-+		if (nft_dev_forward_path(pkt, route, ct, dir, ft) ||
-+		    nft_dev_forward_path(pkt, route, ct, !dir, ft))
-+			return -ENOENT;
- 	}
++	if (route->tuple[dir].xmit_type	== FLOW_OFFLOAD_XMIT_NEIGH &&
++	    nft_dev_forward_path(pkt, route, ct, dir, ft))
++		return -ENOENT;
++	if (route->tuple[!dir].xmit_type == FLOW_OFFLOAD_XMIT_NEIGH &&
++	    nft_dev_forward_path(pkt, route, ct, !dir, ft))
++		return -ENOENT;
  
  	return 0;
  }
@@ -280,13 +279,12 @@ Depends on 675-01 (br_fdb_find_rcu export) and 675-03 (DEV_PATH_MTK_WDMA).
 +	if (ret)
 +		goto err_route_dir1;
 +
-+	if (route->tuple[dir].xmit_type == FLOW_OFFLOAD_XMIT_NEIGH &&
-+	    route->tuple[!dir].xmit_type == FLOW_OFFLOAD_XMIT_NEIGH) {
-+		if (nft_dev_forward_path(pkt, route, ct, dir, ft) ||
-+		    nft_dev_forward_path(pkt, route, ct, !dir, ft)) {
-+			ret = -ENOENT;
-+			goto err_route_dir2;
-+		}
++	if ((route->tuple[dir].xmit_type == FLOW_OFFLOAD_XMIT_NEIGH &&
++	     nft_dev_forward_path(pkt, route, ct, dir, ft)) ||
++	    (route->tuple[!dir].xmit_type == FLOW_OFFLOAD_XMIT_NEIGH &&
++	     nft_dev_forward_path(pkt, route, ct, !dir, ft))) {
++		ret = -ENOENT;
++		goto err_route_dir2;
 +	}
 +
 +	return 0;
@@ -298,3 +296,22 @@ Depends on 675-01 (br_fdb_find_rcu export) and 675-03 (DEV_PATH_MTK_WDMA).
 +	return ret;
 +}
 +EXPORT_SYMBOL_GPL(nft_flow_route_bridging);
+diff -ruN base49/net/netfilter/nft_flow_offload.c new49/net/netfilter/nft_flow_offload.c
+--- a/net/netfilter/nft_flow_offload.c	2026-09-03 00:47:43.411000970 +1000
++++ b/net/netfilter/nft_flow_offload.c	2026-09-03 00:49:03.054762840 +1000
+@@ -105,8 +105,13 @@
+ 		goto out;
+ 
+ 	dir = CTINFO2DIR(ctinfo);
+-	if (nft_flow_route(pkt, ct, &route, dir, priv->flowtable) < 0)
+-		goto err_flow_route;
++	if (nft_flow_offload_is_bridging(pkt->skb)) {
++		if (nft_flow_route_bridging(pkt, ct, &route, dir, priv->flowtable) < 0)
++			goto err_flow_route;
++	} else {
++		if (nft_flow_route(pkt, ct, &route, dir, priv->flowtable) < 0)
++			goto err_flow_route;
++	}
+ 
+ 	flow = flow_offload_alloc(ct);
+ 	if (!flow)

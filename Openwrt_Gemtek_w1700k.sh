@@ -24,15 +24,19 @@ if ! command -v dos2unix &> /dev/null || ! command -v rsync &> /dev/null || ! co
     exit 1
 fi
 
-
 # --- Main Configuration ---
 readonly OPENWRT_REPO="https://github.com/openwrt/openwrt.git"
 # --- Use this line for local testing (uncomment and set your path) ---
 #readonly OPENWRT_REPO="/home/user/openwrt/repos/openwrt"
 
 OPENWRT_BRANCH="master"
-readonly OPENWRT_COMMIT="9550b20e42c35e78c52b443cde08e1aa20c69667"
+readonly OPENWRT_COMMIT=""
 
+# --- Upstream PR: Cherry-pick on top ---
+# Remove the entry once the PR lands in master.
+readonly OPENWRT_PICKS="
+24800:da5c83ece6 0dac9f6620 d8b076516a 6a3c9867e2 a8e7d6faac
+"
 # --- Directory and File Configuration ---
 readonly SOURCE_DEFAULT_CONFIG_DIR="config"
 readonly SOURCE_OPENWRT_PATCH_DIR="openwrt-patches"
@@ -99,6 +103,34 @@ get_latest_commit_hash() {
         exit 1
     fi
     echo "$commit_hash"
+}
+
+apply_upstream_picks() {
+    local target_dir=$1
+    local entry pr shas sha
+    [ -n "$(echo "$OPENWRT_PICKS" | tr -d '[:space:]')" ] || return 0
+    while IFS= read -r entry; do
+        entry=$(echo "$entry" | sed 's/#.*//')
+        [ -z "$(echo "$entry" | tr -d '[:space:]')" ] && continue
+        pr=${entry%%:*}
+        shas=${entry#*:}
+        log "Fetching upstream PR #$pr for cherry-pick..."
+        (cd "$target_dir" && git fetch -q --force "$OPENWRT_REPO" "+refs/pull/$pr/head:refs/picks/pr-$pr") || {
+            log "Error: could not fetch PR #$pr from $OPENWRT_REPO."; exit 1; }
+        for sha in $shas; do
+            if (cd "$target_dir" && git cherry HEAD "$sha" "$sha~1" 2>/dev/null | grep -q "^- "); then
+                log "  skipped $sha (PR #$pr): already in upstream"
+            elif (cd "$target_dir" && git cherry-pick -x "$sha" >/dev/null 2>&1); then
+                log "  picked $sha (PR #$pr)"
+            else
+                log "Error: cherry-pick of $sha (PR #$pr) CONFLICTS with the current base."
+                log "       Resolve by dropping the entry from OPENWRT_PICKS (if merged) or rebasing it."
+                (cd "$target_dir" && git cherry-pick --abort >/dev/null 2>&1 || true)
+                exit 1
+            fi
+        done
+    done <<< "$OPENWRT_PICKS"
+    log "Upstream picks applied. HEAD is now: $(cd "$target_dir" && git rev-parse --short HEAD)"
 }
 
 setup_repo() {
@@ -290,7 +322,6 @@ install_luci_apps_from_list() {
         log "(LuCI Apps) Copying '$source_name' to '$dest_relative_path'..."
         mkdir -p "$(dirname "$dest_app")"
         cp -r "$source_app" "$dest_app"
-
         find "$dest_app" -type f \( -name '*.sh' -o -path '*/etc/init.d/*' \
              -o -path '*/etc/uci-defaults/*' -o -path '*/usr/libexec/*' \) -exec chmod +x {} +
 
@@ -385,6 +416,7 @@ main() {
         log "Latest commit for OpenWrt '$OPENWRT_BRANCH' is: $openwrt_commit"
     fi
     setup_repo "$OPENWRT_REPO" "$OPENWRT_BRANCH" "$openwrt_commit" "$OPENWRT_DIR" "OpenWrt"
+    apply_upstream_picks "$OPENWRT_DIR"
 
     (
         cd "$OPENWRT_DIR"

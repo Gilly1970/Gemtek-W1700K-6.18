@@ -120,9 +120,9 @@ function setup_phy(phy, config, data) {
 	log(`Configuring '${phy}' distance: ${config.distance}`);
 	if (antenna_changed) {
 		log(`Setting antenna for '${phy}' txantenna: ${config.txantenna}, rxantenna: ${config.rxantenna}`);
-		system(`iw phy ${phy} set antenna ${config.txantenna} ${config.rxantenna}`);
+		system(`iw phy ${phy} set antenna ${config.txantenna} ${config.rxantenna} >/dev/null 2>&1`);
 	}
-	system(`iw phy ${phy} set distance ${config.distance}`);
+	system(`iw phy ${phy} set distance ${config.distance} >/dev/null 2>&1`);
 	if (config.radio == null || config.radio < 0)
 		set_txpower([ 'iw', 'phy', phy, 'set', 'txpower' ], config.txpower);
 

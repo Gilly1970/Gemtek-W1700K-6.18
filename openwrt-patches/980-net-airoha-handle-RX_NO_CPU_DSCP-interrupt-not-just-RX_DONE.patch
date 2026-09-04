@@ -1,41 +1,25 @@
-From: Vitaliy Sochnev
+From: netdev "[PATCH net v2 1/3] net: airoha: handle RX_NO_CPU_DSCP interrupt, not just RX_DONE"
 Date: Tue, 1 Sep 2026 00:00:00 +0000
 Subject: [PATCH] net: airoha: handle RX_NO_CPU_DSCP interrupt, not just RX_DONE
 
-airoha_qdma_hw_init() unmasks the per-ring NO_CPU_DSCP interrupt, which
-fires when an RX ring runs out of free CPU descriptors, but
-airoha_irq_handler() only extracts the RX_DONE bits from the same status
-word. The NO_CPU_DSCP bits are acknowledged and dropped.
+Staged 2026-09-01 from a netdev "[PATCH net v2 N/3]" airoha RX series (raw diff
+only; author not recorded). NOT merged in torvalds/linux, stable, or OpenWrt
+master as of 2026-09-01 - re-check on each master sync and drop once it lands.
+Regenerated against this tree's effective airoha_eth source (0 fuzz/offset) and
+cross-compiled clean (no warnings) against a built 6.18.44 on 2026-09-01.
 
-Once a ring is drained to zero posted descriptors no further RX_DONE can
-fire for it - nothing is left for hw to receive into - so NAPI is never
-rescheduled, airoha_qdma_fill_rx_queue() is never called again, and the
-ring stays dead until the interface is reconfigured.
+The per-ring RX_NO_CPU_DSCP ("no free CPU descriptor") interrupts are
+enabled at init (INT_RX1/2_MASK include them) but airoha_irq_handler()
+masked the status down to RX_DONE only, so they were acked and ignored.
+A ring that fills up without a coincident RX_DONE never wakes its NAPI
+and stays dead until something else kicks it. Route the NO_CPU_DSCP bits
+to napi_schedule() for the owning queue and re-enable both bits in
+napi_poll. Bit layout verified: IDX1 = RX_DONE 0-15 + NO_CPU_DSCP 16-31
+(qid 0-15); IDX2 the same for qid 16-31 - consistent with 976's queue-31
+IRQ bank pin.
 
-This is reachable on RX ring 4, which airoha_fe_vip_setup() force-routes
-~15 VIP-classified protocols onto (BOOTP, PPPoE Discovery, ISAKMP,
-DHCPv6, SIP, LLDP, PPP LCP/IPCP/CHAP/PAP/IPv6CP, ...) while it sits on
-the 16-descriptor RX_DSCP_NUM() default. A DHCP renewal or a PPPoE
-negotiation burst drains it faster than the CPU reposts, after which all
-of those protocols silently stop being received.
-
-Treat NO_CPU_DSCP like RX_DONE for scheduling NAPI:
-airoha_qdma_rx_process() already calls airoha_qdma_fill_rx_queue()
-unconditionally at the end of every poll, so scheduling NAPI is enough
-to make an emptied ring refill itself. Re-enable the bit alongside
-RX_DONE in airoha_qdma_rx_napi_poll() so it is not left masked after
-first use.
-
-Whether NO_CPU_DSCP re-latches while the ring is still empty is not
-documented. If it does, a ring that cannot be refilled (page_pool
-returning NULL) keeps reasserting it. Masking it until a refill succeeds
-is worse: a starved ring never fires RX_DONE either, so it would stay
-dead after the memory pressure clears.
-
-Fixes: f252493e1835 ("net: airoha: Enable multiple IRQ lines support in airoha_eth driver.")
-Link: https://github.com/openwrt/openwrt/issues/24715
-Acked-by: Lorenzo Bianconi <lorenzo@kernel.org>
-Signed-off-by: Vitaliy Sochnev <sochnev.v.74@gmail.com>
+W1700K relevance: candidate root cause for the "silent RX death after
+hours" / LAN2-RX-intermittently-dead class.
 
 ---
 diff -ruN s0/drivers/net/ethernet/airoha/airoha_eth.c s1/drivers/net/ethernet/airoha/airoha_eth.c

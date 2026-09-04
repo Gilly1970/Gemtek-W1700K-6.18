@@ -7,7 +7,8 @@ window (protected by dev->reg_lock) is accessed from hardirq context:
 spin_lock_bh does not disable hardirqs, so an interrupt can reenter the
 remap window mid-access. Use spin_lock_irqsave/irqrestore instead.
 
-Rebased onto OpenWrt mt76 pin b2704cf5 (2026-08-01); original MTK context
+Rebased onto OpenWrt mt76 pin be5ce791 (2026-09-01): upstream 69f26dbae7 changed the
+addr test to INVALID_REG_ADDR. Previously rebased onto b2704cf5 (2026-08-01); original MTK context
 was cut against an older base. Original: gerrit 12465539 (mtk-openwrt-feeds).
 
 Signed-off-by: Shayne Chen <shayne.chen@mediatek.com>
@@ -20,7 +21,7 @@ Signed-off-by: Shayne Chen <shayne.chen@mediatek.com>
  	u32 addr = __mt7996_reg_addr(dev, offset);
 +	unsigned long flags;
  
- 	if (addr) {
+ 	if (addr != INVALID_REG_ADDR) {
  		memcpy_fromio(buf, dev->mt76.mmio.regs + addr, len);
  		return;
  	}
@@ -39,7 +40,7 @@ Signed-off-by: Shayne Chen <shayne.chen@mediatek.com>
  	u32 addr = __mt7996_reg_addr(dev, offset), val;
 +	unsigned long flags;
  
- 	if (addr)
+ 	if (addr != INVALID_REG_ADDR)
  		return dev->bus_ops->rr(mdev, addr);
  
 -	spin_lock_bh(&dev->reg_lock);
@@ -56,7 +57,7 @@ Signed-off-by: Shayne Chen <shayne.chen@mediatek.com>
  	u32 addr = __mt7996_reg_addr(dev, offset);
 +	unsigned long flags;
  
- 	if (addr) {
+ 	if (addr != INVALID_REG_ADDR) {
  		dev->bus_ops->wr(mdev, addr, val);
  		return;
  	}
@@ -74,7 +75,7 @@ Signed-off-by: Shayne Chen <shayne.chen@mediatek.com>
  	u32 addr = __mt7996_reg_addr(dev, offset);
 +	unsigned long flags;
  
- 	if (addr)
+ 	if (addr != INVALID_REG_ADDR)
  		return dev->bus_ops->rmw(mdev, addr, mask, val);
  
 -	spin_lock_bh(&dev->reg_lock);

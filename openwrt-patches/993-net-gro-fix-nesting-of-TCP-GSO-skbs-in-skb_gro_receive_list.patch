@@ -37,6 +37,26 @@ Fixes: 8d95dc474f85 ("net: add code for TCP fraglist GRO")
 Signed-off-by: Zhaoping Shu <zhaoping.shu@mediatek.com>
 Signed-off-by: HW He <hw.he@mediatek.com>
 
+[W1700K staging note, kept from 2026-09-01 staging:]
+Staged 2026-09-01 from the netdev "[PATCH net v5]" submission (raw diff
+only; author not recorded — lore was unreachable when staged). NOT merged
+in torvalds/linux, stable, or OpenWrt master as of 2026-09-01; re-check on
+each master sync and drop this copy once it lands (see 991/992 above).
+
+A hardware-GRO'd skb (gso_size/gso_segs already set) that reaches software
+GRO on a fraglist-GRO device for a forwarded flow (no local socket) was
+chained onto p->frag_list by skb_gro_receive_list(). skb_segment_list()
+assumes every list member is a single MSS-sized frame, so on egress it
+emits oversized non-GSO "segments" -> drops/stalls on software-forwarded
+TCP. Fix: never mark a GSO skb is_flist; route it through the regular
+skb_gro_receive() path (which handles GSO inputs), and flush on
+is_flist mismatch between p and skb (UDP already does this).
+
+W1700K relevance: OpenWrt hack-6.18/600 turns fraglist GRO on for every
+netdev, and airoha HW GRO (in-tree 916/920 + local 975/977) feeds GSO skbs
+into napi_gro_receive(). NETIF_F_GRO_HW is opt-in (ethtool -K wan
+rx-gro-hw on), so this is a no-op on a stock boot and a correctness fix
+once HW GRO is enabled for the 975/976/977 soak.
 ---
 diff --git a/net/ipv4/tcp_offload.c b/net/ipv4/tcp_offload.c
 index 3b1fdcd3cb29..e74d99ca9fac 100644
