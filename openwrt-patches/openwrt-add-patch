@@ -31,6 +31,9 @@ package/network/services/hostapd/patches/061-hostapd-omit-mlo-link-id-for-non-ml
 package/network/services/hostapd/patches/602-allow-config-EHT-rate.patch
 package/network/utils/iwinfo/patches/700-nl80211-freqlist-per-radio.patch
 package/network/utils/iwinfo/patches/999-fix-txpower-list.patch
+package/kernel/mac80211/patches/subsys/400-mac80211-defer-ap-side-ft-key-upload.patch
+netfid-Makefile:package/network/config/netifd/Makefile
+packet-steering.uc:package/network/config/netifd/files/usr/libexec/network/packet-steering.uc
 rtl8261ce/Kconfig:target/linux/generic/files/drivers/net/phy/rtl8261ce/Kconfig
 rtl8261ce/Makefile:target/linux/generic/files/drivers/net/phy/rtl8261ce/Makefile
 rtl8261ce/rtk_rtl8261ce_patch.h:target/linux/generic/files/drivers/net/phy/rtl8261ce/rtk_rtl8261ce_patch.h
