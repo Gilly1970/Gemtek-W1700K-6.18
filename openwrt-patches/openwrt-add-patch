@@ -3,6 +3,7 @@ bridger-Makefile:package/network/services/bridger/Makefile
 config-6.18:target/linux/airoha/an7581/config-6.18
 feeds/luci/modules/luci-mod-status/patches/998-luci-channel-analysis-single-wiphy-multiradio.patch
 feeds/luci/modules/luci-mod-status/patches/999-memory-storage-bar-adjust.patch
+feeds/luci/modules/luci-mod-network/patches/997-luci-wireless-eht320-block-select.patch
 firmware/airoha/en7581_MT7996_npu_data.bin:target/linux/airoha/files/firmware/airoha/en7581_MT7996_npu_data.bin
 firmware/airoha/en7581_MT7996_npu_rv32.bin:target/linux/airoha/files/firmware/airoha/en7581_MT7996_npu_rv32.bin
 mac80211.sh:package/network/config/wifi-scripts/files-ucode/lib/netifd/wireless/mac80211.sh

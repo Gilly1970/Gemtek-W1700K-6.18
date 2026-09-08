@@ -35,7 +35,7 @@ readonly OPENWRT_COMMIT=""
 # --- Upstream PR: Cherry-pick on top ---
 # Remove the entry once the PR lands in master.
 readonly OPENWRT_PICKS="
-24800:da5c83ece6 0dac9f6620 d8b076516a 6a3c9867e2 a8e7d6faac
+24800:b05d134027 94e2bb1f05 32a2a980f6 106c3a86e4 85e1a8c58b 52f4e6bcce 394d741e6e cb2c5b1052
 "
 # --- Directory and File Configuration ---
 readonly SOURCE_DEFAULT_CONFIG_DIR="config"

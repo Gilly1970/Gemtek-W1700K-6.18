@@ -1,0 +1,28 @@
+From: Gilly1970 <gilroyscott@hotmail.com>
+Date: Mon, 7 Sep 2026 12:00:00 +1000
+Subject: [PATCH] luci-mod-network: expose EHT320-1 / EHT320-2 channel widths
+
+On 6 GHz a 320 MHz channel can sit in one of two overlapping block
+layouts (block 1 centred on channels 31/95/159/223, block 2 on
+63/127/191). Regulatory domains that stop at channel 93 (UK, Japan,
+...) can only run 320 MHz on channels 65-93 through block 2, but the
+width selector only offered the automatic "EHT320" which picks block 1
+there and hostapd then rejects the channel. Offer both explicit
+variants alongside the automatic one; the wifi-scripts backend maps
+them to the right centre and eht_bw320_offset.
+
+Ref: https://github.com/openwrt/openwrt/issues/25053
+---
+--- a/htdocs/luci-static/resources/view/network/wireless.js
++++ b/htdocs/luci-static/resources/view/network/wireless.js
+@@ -401,7 +401,9 @@
+ 					'EHT40', '40 MHz', { available: htmodelist.EHT40 },
+ 					'EHT80', '80 MHz', { available: htmodelist.EHT80 },
+ 					'EHT160', '160 MHz', { available: htmodelist.EHT160 },
+-					'EHT320', '320 MHz', { available: htmodelist.EHT320 }
++					'EHT320', '320 MHz', { available: htmodelist.EHT320 },
++					'EHT320-1', '320 MHz (block 1)', { available: htmodelist.EHT320 },
++					'EHT320-2', '320 MHz (block 2)', { available: htmodelist.EHT320 }
+ 				]
+ 			};
+ 

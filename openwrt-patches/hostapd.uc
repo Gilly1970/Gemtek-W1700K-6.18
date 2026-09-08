@@ -1,7 +1,7 @@
 'use strict';
 
 import {
-	append, append_raw, append_vars, dump_config, flush_config, set_default,
+	append, append_raw, append_vars, dump_config, flush_config, log, set_default,
 	wiphy_info, wiphy_band
 } from 'wifi.common';
 import { validate } from 'wifi.validate';
@@ -273,13 +273,33 @@ function device_htmode_append(config) {
 				[ 61, 31 ], [ 125, 95 ], [ 189, 159 ], [ 221, 191 ]
 			];
 
-			for (let k, v in eht_center_seg0_map)
-				if (config.channel <= v[0]) {
-					config.eht_oper_centr_freq_seg0_idx = v[1];
-					break;
-				}
+			/* W1700K: explicit 320 MHz block from EHT320-1 / EHT320-2
+			 * (set in mac80211.sh). Block 1 spans 1-61, 65-125, 129-189,
+			 * 193-253; block 2 spans 33-93, 97-157, 161-221. A block-2
+			 * request below channel 33 has no valid block: fall back to
+			 * the automatic map. With a fixed channel hostapd derives
+			 * eht_bw320_offset from the centre itself; with ACS the
+			 * explicit value below is used as the preferred block. */
+			let bw320 = config.eht_bw320_offset;
+			if (bw320 == 2 && config.channel && config.channel < 33) {
+				log(`EHT320-2 has no valid block for channel ${config.channel}, using automatic block`);
+				bw320 = null;
+				delete config.eht_bw320_offset;
+			}
+
+			if (bw320 == 1 && config.channel)
+				config.eht_oper_centr_freq_seg0_idx = 31 + 64 * int((config.channel - 1) / 64);
+			else if (bw320 == 2 && config.channel)
+				config.eht_oper_centr_freq_seg0_idx = 63 + 64 * int((config.channel - 33) / 64);
+			else
+				for (let k, v in eht_center_seg0_map)
+					if (config.channel <= v[0]) {
+						config.eht_oper_centr_freq_seg0_idx = v[1];
+						break;
+					}
 			config.op_class = 137;
 			config.eht_oper_chwidth = 7;
+			append_vars(config, [ 'eht_bw320_offset' ]);
 
 			/*
 			 * Set HE operation values for 160MHz backward compatibility
