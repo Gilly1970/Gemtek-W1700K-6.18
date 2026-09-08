@@ -273,13 +273,14 @@ function device_htmode_append(config) {
 				[ 61, 31 ], [ 125, 95 ], [ 189, 159 ], [ 221, 191 ]
 			];
 
-			/* W1700K: explicit 320 MHz block from EHT320-1 / EHT320-2
-			 * (set in mac80211.sh). Block 1 spans 1-61, 65-125, 129-189,
-			 * 193-253; block 2 spans 33-93, 97-157, 161-221. A block-2
-			 * request below channel 33 has no valid block: fall back to
-			 * the automatic map. With a fixed channel hostapd derives
-			 * eht_bw320_offset from the centre itself; with ACS the
-			 * explicit value below is used as the preferred block. */
+            /* EHT320-1 / EHT320-2 select the 320 MHz block explicitly
+             * (eht_bw320_offset is set by mac80211.sh). Block 1 spans
+             * channels 1-61, 65-125, 129-189 and 193-253; block 2 spans
+             * 33-93, 97-157 and 161-221. A block-2 request below channel
+             * 33 has no valid block: fall back to the automatic map.
+             * With a fixed channel hostapd derives the block from the
+             * center itself; under ACS eht_bw320_offset is the preferred
+             * block. */lock. */
 			let bw320 = config.eht_bw320_offset;
 			if (bw320 == 2 && config.channel && config.channel < 33) {
 				log(`EHT320-2 has no valid block for channel ${config.channel}, using automatic block`);

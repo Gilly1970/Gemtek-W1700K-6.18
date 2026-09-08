@@ -356,11 +356,12 @@ function setup() {
 	}
 	delete config.hwmode;
 
-	/* W1700K: EHT320-1 / EHT320-2 select the 320 MHz block explicitly
-	 * (block 1 = centres 31/95/159/223, block 2 = centres 63/127/191).
-	 * The schema and every consumer only know plain EHT320, so normalise
-	 * the htmode here and carry the block choice as eht_bw320_offset for
-	 * the hostapd generator. Ref openwrt/openwrt#25053. */
+     /* EHT320-1 / EHT320-2 select the 320 MHz block explicitly
+      * (block 1 = centers 31/95/159/223, block 2 = centers 63/127/191),
+      * as the legacy shell script already allowed. The schema and every
+      * other consumer only know plain EHT320, so normalise the htmode
+      * here and carry the block choice as eht_bw320_offset for the
+      * hostapd generator. */
 	let bw320 = match(config.htmode, /^EHT320-([12])$/);
 	if (bw320)
 		config.htmode = 'EHT320';

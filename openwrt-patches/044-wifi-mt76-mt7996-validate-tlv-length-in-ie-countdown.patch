@@ -1,0 +1,50 @@
+From: New_patches (origin unknown, evaluated 2026-09-08)
+Subject: [PATCH] wifi: mt76: mt7996: validate TLV length in mt7996_mcu_ie_countdown
+
+The IE countdown event parser walked the TLV list using only a non-zero
+length as its loop guard.  A TLV whose length runs past the end of the
+skb was still dereferenced (event->omac_idx read from beyond tail), and
+a length smaller than the TLV header would not advance the cursor.
+
+Bound each tag to the skb, require it to be at least the header size so
+the loop always makes progress, and only read the countdown payload when
+the tag actually carries one.  Mirrors the tag_len checks mainline already
+applies in the all_sta_info event parser (see 026).
+
+Status: not in openwrt/mt76 be5ce791 (HEAD 2026-09-08) nor torvalds master.
+Applies to pin with all in-tree patches at offset +237, fuzz 0.
+
+diff --git a/mt7996/mcu.c b/mt7996/mcu.c
+index cd7587ce5b8a6..f74c4b0bda3c1 100644
+--- a/mt7996/mcu.c
++++ b/mt7996/mcu.c
+@@ -497,10 +497,18 @@ mt7996_mcu_ie_countdown(struct mt7996_dev *dev, struct sk_buff *skb)
+ 
+ 	tail = skb->data + skb->len;
+ 	data += sizeof(*hdr);
+-	while (data + sizeof(*tlv) < tail && le16_to_cpu(tlv->len)) {
++	while (data + sizeof(*tlv) <= tail) {
++		u16 tag_len = le16_to_cpu(tlv->len);
++
++		if (tag_len < sizeof(*tlv) || data + tag_len > tail)
++			break;
++
+ 		event = (struct mt7996_mcu_countdown_notify *)tlv->data;
+ 
+-		cdata.omac_idx = event->omac_idx;
++		if (tag_len >= sizeof(*tlv) + sizeof(*event))
++			cdata.omac_idx = event->omac_idx;
++		else
++			break;
+ 
+ 		switch (le16_to_cpu(tlv->tag)) {
+ 		case UNI_EVENT_IE_COUNTDOWN_CSA:
+@@ -517,7 +525,7 @@ mt7996_mcu_ie_countdown(struct mt7996_dev *dev, struct sk_buff *skb)
+ 			break;
+ 		}
+ 
+-		data += le16_to_cpu(tlv->len);
++		data += tag_len;
+ 		tlv = (struct tlv *)data;
+ 	}
+ }
