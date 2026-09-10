@@ -26,6 +26,7 @@ package/kernel/mt76/patches/038-wifi-mt76-mt7996-expose-per-link-sta-stats-debug
 package/kernel/mt76/patches/039-wifi-mt76-mt7996-poll-adm-stat-under-npu-offload.patch
 package/kernel/mt76/patches/042-wifi-mt76-fix-queue-assignment-for-disassoc-packets.patch
 package/kernel/mt76/patches/044-wifi-mt76-mt7996-validate-tlv-length-in-ie-countdown.patch
+package/kernel/mt76/patches/045-wifi-mt76-mt7996-refresh-tx-agg-timer-under-npu-offload.patch
 package/network/config/wifi-scripts/files-ucode/usr/share/ucode/wifi/ap.uc
 package/network/config/wifi-scripts/files-ucode/usr/share/ucode/wifi/hostapd.uc
 package/network/services/hostapd/patches/015-mtk-hostapd-mtk-6G-band-does-not-require-DFS.patch
@@ -34,8 +35,6 @@ package/network/services/hostapd/patches/602-allow-config-EHT-rate.patch
 package/network/utils/iwinfo/patches/700-nl80211-freqlist-per-radio.patch
 package/network/utils/iwinfo/patches/999-fix-txpower-list.patch
 package/kernel/mac80211/patches/subsys/400-mac80211-defer-ap-side-ft-key-upload.patch
-netfid-Makefile:package/network/config/netifd/Makefile
-packet-steering.uc:package/network/config/netifd/files/usr/libexec/network/packet-steering.uc
 rtl8261ce/Kconfig:target/linux/generic/files/drivers/net/phy/rtl8261ce/Kconfig
 rtl8261ce/Makefile:target/linux/generic/files/drivers/net/phy/rtl8261ce/Makefile
 rtl8261ce/rtk_rtl8261ce_patch.h:target/linux/generic/files/drivers/net/phy/rtl8261ce/rtk_rtl8261ce_patch.h
@@ -70,6 +69,7 @@ target/linux/generic/hack-6.18/999-net-phy-realtek-rtl8261ce.patch
 target/linux/generic/pending-6.18/675-01-net-bridge-export-br_fdb_find_rcu.patch
 target/linux/generic/pending-6.18/675-03-nf_flow_table_path-add-DEV_PATH_MTK_WDMA-path.patch
 target/linux/generic/pending-6.18/675-05-nft_flow_offload-add-bridging-support.patch
+target/linux/generic/pending-6.18/675-06-nft_flow_offload-bridge-vlan-context.patch
 target/linux/generic/pending-6.18/802-OPP-Provide-old-opp-to-config_clks-on-_set_opp.patch
 target/linux/generic/pending-6.18/993-net-gro-fix-nesting-of-TCP-GSO-skbs-in-skb_gro_receive_list.patch
 wifi-scripts-Makefile:package/network/config/wifi-scripts/Makefile

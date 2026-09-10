@@ -35,7 +35,8 @@ readonly OPENWRT_COMMIT=""
 # --- Upstream PR: Cherry-pick on top ---
 # Remove the entry once the PR lands in master.
 readonly OPENWRT_PICKS="
-24800:b05d134027 94e2bb1f05 32a2a980f6 106c3a86e4 85e1a8c58b 52f4e6bcce 394d741e6e cb2c5b1052
+24800:b05d134027 94e2bb1f05 32a2a980f6 106c3a86e4 85e1a8c58b 52f4e6bcce 394d741e6e
+local:openwrt-patches/staging/pr24800-cb2c5b1052-kernel-bump-6.18.50.rebased-ac2ed40b48.patch
 "
 # --- Directory and File Configuration ---
 readonly SOURCE_DEFAULT_CONFIG_DIR="config"
@@ -107,13 +108,32 @@ get_latest_commit_hash() {
 
 apply_upstream_picks() {
     local target_dir=$1
-    local entry pr shas sha
+    local entry pr shas sha patch_file
     [ -n "$(echo "$OPENWRT_PICKS" | tr -d '[:space:]')" ] || return 0
     while IFS= read -r entry; do
         entry=$(echo "$entry" | sed 's/#.*//')
         [ -z "$(echo "$entry" | tr -d '[:space:]')" ] && continue
         pr=${entry%%:*}
         shas=${entry#*:}
+        if [ "$pr" = "local" ]; then
+            for patch_file in $shas; do
+                patch_file="$REPO_ROOT/$patch_file"
+                if [ ! -f "$patch_file" ]; then
+                    log "Error: local pick '$patch_file' not found."; exit 1
+                fi
+                if (cd "$target_dir" && git apply --check -R "$patch_file" >/dev/null 2>&1); then
+                    log "  skipped $(basename "$patch_file") (local): already in the base"
+                elif (cd "$target_dir" && git am -3 "$patch_file" >/dev/null 2>&1); then
+                    log "  applied $(basename "$patch_file") (local)"
+                else
+                    log "Error: local pick $(basename "$patch_file") does NOT apply to the current base."
+                    log "       Its upstream PR was probably rebased or merged: drop or regenerate the entry."
+                    (cd "$target_dir" && git am --abort >/dev/null 2>&1 || true)
+                    exit 1
+                fi
+            done
+            continue
+        fi
         log "Fetching upstream PR #$pr for cherry-pick..."
         (cd "$target_dir" && git fetch -q --force "$OPENWRT_REPO" "+refs/pull/$pr/head:refs/picks/pr-$pr") || {
             log "Error: could not fetch PR #$pr from $OPENWRT_REPO."; exit 1; }

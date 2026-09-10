@@ -1,0 +1,26 @@
+From: Gilly <gilroyscott1970@gmail.com>
+Date: Wed, 10 Sep 2026 00:00:00 +0000
+Subject: [PATCH] wifi: mt76: mt7996: refresh the tx agg session timer under NPU offload
+
+On boards using Airoha NPU offload, TX block-ack sessions get torn down mid-transfer 
+whenever the peer negotiates a BlockAck timeout (Intel stations commonly do). Offloaded 
+traffic bypasses mac80211, so nothing refreshes the session timer — the driver only did 
+that for WED devices, and the NPU path was gated out. The result is a DELBA in the middle 
+of a transfer and throughput collapsing to un-aggregated rates, with no recovery until 
+unrelated traffic happens to take the software path. Extending the gate to cover NPU 
+devices keeps the session alive the same way it already works on WED.
+
+Signed-off-by: Gilly <gilroyscott1970@gmail.com>
+---
+--- a/mt7996/mac.c
++++ b/mt7996/mac.c
+@@ -1511,7 +1511,8 @@
+ 		}
+ 	}
+ 
+-	if (mtk_wed_device_active(&dev->mt76.mmio.wed) && wcid->sta) {
++	if ((mtk_wed_device_active(&dev->mt76.mmio.wed) ||
++	     mt76_npu_device_active(&dev->mt76)) && wcid->sta) {
+ 		struct ieee80211_sta *sta;
+ 		u8 tid;
+ 

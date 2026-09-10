@@ -1,0 +1,251 @@
+From: Gilly <gilroyscott1970@gmail.com>
+Date: Thu, 11 Sep 2026 00:00:00 +0000
+Subject: [PATCH] netfilter: nft_flow_offload: carry the bridge VLAN into the forward-path walk
+
+Bridged flows on VLAN-filtering bridges are never offloaded unless they sit on the bridge PVID. 
+The forward-path walk starts with no VLAN context, so the bridge falls back to the master's 
+PVID and searches the wrong FDB — the lookup misses, the walk fails, and the flow silently drops 
+back to software forwarding, leaving tagged-bridge-port users with no PPE acceleration at all. 
+Seeding the walk with the VLAN the frame arrived on (its tag, or the ingress port's PVID when 
+untagged) points the lookup at the right FDB. Untagged setups on the bridge PVID end up with 
+the same wire format as before and are unaffected; only non-PVID flows, which aren't offloaded 
+today, change behaviour.
+
+Signed-off-by: Gilly <gilroyscott1970@gmail.com>
+---
+--- a/include/linux/netdevice.h
++++ b/include/linux/netdevice.h
+@@ -3372,6 +3372,8 @@
+ int dev_fill_metadata_dst(struct net_device *dev, struct sk_buff *skb);
+ int dev_fill_forward_path(const struct net_device *dev, const u8 *daddr,
+ 			  struct net_device_path_stack *stack);
++int __dev_fill_forward_path(struct net_device_path_ctx *ctx, const u8 *daddr,
++			    struct net_device_path_stack *stack);
+ struct net_device *dev_get_by_name(struct net *net, const char *name);
+ struct net_device *dev_get_by_name_rcu(struct net *net, const char *name);
+ struct net_device *__dev_get_by_name(struct net *net, const char *name);
+--- a/net/core/dev.c
++++ b/net/core/dev.c
+@@ -744,44 +744,52 @@
+ 	return &stack->path[k];
+ }
+ 
+-int dev_fill_forward_path(const struct net_device *dev, const u8 *daddr,
+-			  struct net_device_path_stack *stack)
++int __dev_fill_forward_path(struct net_device_path_ctx *ctx, const u8 *daddr,
++			    struct net_device_path_stack *stack)
+ {
+ 	const struct net_device *last_dev;
+-	struct net_device_path_ctx ctx = {
+-		.dev	= dev,
+-	};
+ 	struct net_device_path *path;
+ 	int ret = 0;
+ 
+-	memcpy(ctx.daddr, daddr, sizeof(ctx.daddr));
++	memcpy(ctx->daddr, daddr, sizeof(ctx->daddr));
+ 	stack->num_paths = 0;
+-	while (ctx.dev && ctx.dev->netdev_ops->ndo_fill_forward_path) {
+-		last_dev = ctx.dev;
++	while (ctx->dev && ctx->dev->netdev_ops->ndo_fill_forward_path) {
++		last_dev = ctx->dev;
+ 		path = dev_fwd_path(stack);
+ 		if (!path)
+ 			return -1;
+ 
+ 		memset(path, 0, sizeof(struct net_device_path));
+-		ret = ctx.dev->netdev_ops->ndo_fill_forward_path(&ctx, path);
++		ret = ctx->dev->netdev_ops->ndo_fill_forward_path(ctx, path);
+ 		if (ret < 0)
+ 			return -1;
+ 
+-		if (WARN_ON_ONCE(last_dev == ctx.dev))
++		if (WARN_ON_ONCE(last_dev == ctx->dev))
+ 			return -1;
+ 	}
+ 
+-	if (!ctx.dev)
++	if (!ctx->dev)
+ 		return ret;
+ 
+ 	path = dev_fwd_path(stack);
+ 	if (!path)
+ 		return -1;
+ 	path->type = DEV_PATH_ETHERNET;
+-	path->dev = ctx.dev;
++	path->dev = ctx->dev;
+ 
+ 	return ret;
+ }
++EXPORT_SYMBOL_GPL(__dev_fill_forward_path);
++
++int dev_fill_forward_path(const struct net_device *dev, const u8 *daddr,
++			  struct net_device_path_stack *stack)
++{
++	struct net_device_path_ctx ctx = {
++		.dev	= dev,
++	};
++
++	return __dev_fill_forward_path(&ctx, daddr, stack);
++}
+ EXPORT_SYMBOL_GPL(dev_fill_forward_path);
+ 
+ /* must be called under rcu_read_lock(), as we dont take a reference */
+--- a/net/netfilter/nf_flow_table_path.c
++++ b/net/netfilter/nf_flow_table_path.c
+@@ -42,6 +42,35 @@
+ 	return true;
+ }
+ 
++/* W1700K/675-06: resolve the bridge VLAN a frame belongs to on its ingress
++ * port: the skb tag when tagged, the port PVID when untagged. Returns 0 when
++ * the bridge is not VLAN-filtering - every FDB lookup then uses vid 0, and a
++ * tag, if there is one, is opaque payload carried straight through.
++ * Caller must hold rcu_read_lock().
++ */
++static u16 nft_bridge_vlan_id_rcu(const struct net_device *dev,
++				  const struct sk_buff *skb, __be16 *proto)
++{
++	struct net_bridge_port *port = br_port_get_rcu(dev);
++	u16 vlan_id = 0;
++
++	if (!port || !br_opt_get(port->br, BROPT_VLAN_ENABLED))
++		return 0;
++
++	if (skb_vlan_tag_present(skb)) {
++		if (proto)
++			*proto = skb->vlan_proto;
++
++		return skb_vlan_tag_get_id(skb);
++	}
++
++	br_vlan_get_pvid_rcu(dev, &vlan_id);
++	if (proto)
++		*proto = port->br->vlan_proto;
++
++	return vlan_id;
++}
++
+ /* W1700K/675-02: detect a bridged flow whose dest MAC is in the bridge FDB.
+  * Such flows are L2-forwarded (WiFi STA <-> LAN via br-lan) and never get an
+  * L3 route, so nft_flow_route() alone leaves xmit_type=NEIGH and the HW-offload
+@@ -60,12 +89,7 @@
+ 	rcu_read_lock();
+ 	port = br_port_get_rcu(skb->dev);
+ 	if (port) {
+-		if (br_opt_get(port->br, BROPT_VLAN_ENABLED)) {
+-			if (skb_vlan_tag_present(skb))
+-				vlan_id = skb_vlan_tag_get_id(skb);
+-			else
+-				br_vlan_get_pvid_rcu(skb->dev, &vlan_id);
+-		}
++		vlan_id = nft_bridge_vlan_id_rcu(skb->dev, skb, NULL);
+ 
+ 		/* lookup fdb entry */
+ 		if (br_fdb_find_rcu(port->br, dmac, vlan_id))
+@@ -77,14 +101,14 @@
+ }
+ EXPORT_SYMBOL_GPL(nft_flow_offload_is_bridging);
+ 
+-static int nft_dev_fill_forward_path(const struct nf_flow_route *route,
++static int nft_dev_fill_forward_path(struct net_device_path_ctx *ctx,
+ 				     const struct dst_entry *dst_cache,
+ 				     const struct nf_conn *ct,
+ 				     enum ip_conntrack_dir dir, u8 *ha,
+ 				     struct net_device_path_stack *stack)
+ {
+ 	const void *daddr = &ct->tuplehash[!dir].tuple.src.u3;
+-	struct net_device *dev = dst_cache->dev;
++	const struct net_device *dev = ctx->dev;
+ 	struct neighbour *n;
+ 	u8 nud_state;
+ 
+@@ -111,7 +135,7 @@
+ 		return -1;
+ 
+ out:
+-	return dev_fill_forward_path(dev, ha, stack);
++	return __dev_fill_forward_path(ctx, ha, stack);
+ }
+ 
+ struct nft_forward_info {
+@@ -230,6 +254,21 @@
+ 	return found;
+ }
+ 
++/* Record a VLAN header that is on the wire at this direction's egress (which
++ * is the opposite direction's ingress). Bridge ports that carry the VLAN
++ * untagged emit DEV_PATH_BR_VLAN_UNTAG during the walk, popping it again.
++ */
++static void nft_dev_encap_push(struct nft_forward_info *info, u16 id,
++			       __be16 proto)
++{
++	if (info->num_encaps >= NF_FLOW_TABLE_ENCAP_MAX)
++		return;
++
++	info->encap[info->num_encaps].id = id;
++	info->encap[info->num_encaps].proto = proto;
++	info->num_encaps++;
++}
++
+ static int nft_dev_forward_path(const struct nft_pktinfo *pkt,
+ 				struct nf_flow_route *route,
+ 				const struct nf_conn *ct,
+@@ -237,6 +276,9 @@
+ 				struct nft_flowtable *ft)
+ {
+ 	const struct dst_entry *dst = route->tuple[dir].dst;
++	struct net_device_path_ctx ctx = {
++		.dev	= dst->dev,
++	};
+ 	struct net_device_path_stack stack;
+ 	struct nft_forward_info info = {};
+ 	enum ip_conntrack_dir skb_dir;
+@@ -251,6 +293,9 @@
+ 	 */
+ 	if (nft_flow_offload_is_bridging(pkt->skb) &&
+ 	    skb_mac_header_was_set(pkt->skb)) {
++		__be16 vlan_proto = 0;
++		u16 vlan_id;
++
+ 		eth = eth_hdr(pkt->skb);
+ 		skb_dir = CTINFO2DIR(skb_get_nfct(pkt->skb) & NFCT_INFOMASK);
+ 		if (skb_dir != dir) {
+@@ -260,9 +305,36 @@
+ 			memcpy(ha, eth->h_dest, ETH_ALEN);
+ 			memcpy(info.h_source, eth->h_source, ETH_ALEN);
+ 		}
++
++		/* Both endpoints of a bridged flow sit in the same VLAN, so the
++		 * ingress VLAN of this packet describes both directions. Seed it
++		 * into the walk context so br_fill_forward_path() searches that
++		 * VLAN's FDB instead of falling back to the bridge PVID, and
++		 * record the tag as an encap because it is on the wire. Without
++		 * this a flow on any VLAN other than the bridge PVID misses the
++		 * FDB, the walk fails and the flow is never offloaded.
++		 */
++		rcu_read_lock();
++		vlan_id = nft_bridge_vlan_id_rcu(pkt->skb->dev, pkt->skb,
++						 &vlan_proto);
++		rcu_read_unlock();
++
++		if (vlan_id) {
++			ctx.num_vlans = 1;
++			ctx.vlan[0].id = vlan_id;
++			ctx.vlan[0].proto = vlan_proto;
++			nft_dev_encap_push(&info, vlan_id, vlan_proto);
++		} else if (skb_vlan_tag_present(pkt->skb)) {
++			/* VLAN-unaware bridge: the tag takes no part in the FDB
++			 * lookup but is still carried through untouched.
++			 */
++			nft_dev_encap_push(&info,
++					   skb_vlan_tag_get_id(pkt->skb),
++					   pkt->skb->vlan_proto);
++		}
+ 	}
+ 
+-	if (nft_dev_fill_forward_path(route, dst, ct, dir, ha, &stack) >= 0)
++	if (nft_dev_fill_forward_path(&ctx, dst, ct, dir, ha, &stack) >= 0)
+ 		nft_dev_path_info(&stack, &info, ha, &ft->data);
+ 
+ 	if (info.outdev)
