@@ -1,0 +1,70 @@
+From: Gilly <gilroyscott1970@gmail.com>
+Date: Thu, 10 Sep 2026 00:00:00 +0000
+Subject: [PATCH] wifi: mt76: mt7996: report firmware station counters under NPU offload
+
+Per-station traffic counters are massively undercounted on NPU boards. The driver only 
+reports the firmware tx/rx byte and packet counters when a WED device is active; otherwise 
+mac80211 falls back to its own software counters, which only see frames that pass through it, 
+and NPU offload bypasses mac80211 exactly as WED does. Over 30 s on a W1700K 5 GHz radio, 
+firmware TX packets climbed by 8937 while mac80211 saw 161. Report the firmware counters 
+under NPU as well; the polls that feed them already run there. Unlike WED, a firmware 
+counter still reading zero is left to mac80211, because on the W1700K the ADM_STAT byte 
+counters stay at zero on every 5 GHz station and a hard zero would be worse than a partial 
+software count. WED behaviour is unchanged.
+
+Depends on 039-wifi-mt76-mt7996-poll-adm-stat-under-npu-offload.patch
+
+Signed-off-by: Gilly <gilroyscott1970@gmail.com>
+---
+diff --git a/mt7996/main.c b/mt7996/main.c
+index 9f6afaf3..df1ceb07 100644
+--- a/mt7996/main.c
++++ b/mt7996/main.c
+@@ -1994,18 +1994,38 @@ static void mt7996_sta_statistics(struct ieee80211_hw *hw,
+ 		-(s8)ewma_avg_signal_read(&msta_link->avg_ack_signal);
+ 	sinfo->filled |= BIT_ULL(NL80211_STA_INFO_ACK_SIGNAL_AVG);
+ 
+-	if (mtk_wed_device_active(&dev->mt76.mmio.wed)) {
+-		sinfo->tx_bytes = msta_link->wcid.stats.tx_bytes;
+-		sinfo->filled |= BIT_ULL(NL80211_STA_INFO_TX_BYTES64);
++	if (mtk_wed_device_active(&dev->mt76.mmio.wed) ||
++	    mt76_npu_device_active(&dev->mt76)) {
++		struct mt76_sta_stats *stats = &msta_link->wcid.stats;
++		bool wed = mtk_wed_device_active(&dev->mt76.mmio.wed);
++
++		/* With WED or NPU offload most frames never pass through
++		 * mac80211, so its software counters undercount badly.
++		 * Report the firmware counters polled by mt7996_mac_work()
++		 * instead. Under NPU, a firmware counter that is still zero
++		 * is left to mac80211: the ADM_STAT byte counters are not
++		 * populated on every band, and a hard zero would be worse
++		 * than the partial software count.
++		 */
++		if (wed || stats->tx_bytes) {
++			sinfo->tx_bytes = stats->tx_bytes;
++			sinfo->filled |= BIT_ULL(NL80211_STA_INFO_TX_BYTES64);
++		}
+ 
+-		sinfo->rx_bytes = msta_link->wcid.stats.rx_bytes;
+-		sinfo->filled |= BIT_ULL(NL80211_STA_INFO_RX_BYTES64);
++		if (wed || stats->rx_bytes) {
++			sinfo->rx_bytes = stats->rx_bytes;
++			sinfo->filled |= BIT_ULL(NL80211_STA_INFO_RX_BYTES64);
++		}
+ 
+-		sinfo->tx_packets = msta_link->wcid.stats.tx_packets;
+-		sinfo->filled |= BIT_ULL(NL80211_STA_INFO_TX_PACKETS);
++		if (wed || stats->tx_packets) {
++			sinfo->tx_packets = stats->tx_packets;
++			sinfo->filled |= BIT_ULL(NL80211_STA_INFO_TX_PACKETS);
++		}
+ 
+-		sinfo->rx_packets = msta_link->wcid.stats.rx_packets;
+-		sinfo->filled |= BIT_ULL(NL80211_STA_INFO_RX_PACKETS);
++		if (wed || stats->rx_packets) {
++			sinfo->rx_packets = stats->rx_packets;
++			sinfo->filled |= BIT_ULL(NL80211_STA_INFO_RX_PACKETS);
++		}
+ 	}
+ }
+ 
