@@ -1,0 +1,30 @@
+From: Slavin Liu <bolin.liu@seu.edu.cn>
+Date: Sun, 13 Sep 2026 00:00:00 +0000
+Subject: [PATCH] wifi: mt76: mt7996: guard NULL sta on the EAPOL TX path
+
+mac80211 lets EAPOL frames sourced from the local address through to an
+unauthorized destination, so hostapd can hand the driver a control-port
+frame for a station that has already been removed (e.g. a 4-way handshake
+retransmit racing a disconnect). mt7996_tx() then passes a NULL sta and the
+frame reaches mt7996_tx_prepare_skb() with skb->protocol == ETH_P_PAE, where
+the software MLD address translation dereferences sta->mlo unconditionally
+and oopses in the TX worker.
+
+The data-QoS MLO link selection earlier in the function already checks sta
+at our mt76 pin; this is the remaining unguarded half of the upstream RFC
+"wifi: mt76: mt7996: guard station-only MLO TX handling".
+
+Signed-off-by: Slavin Liu <bolin.liu@seu.edu.cn>
+---
+diff --git a/mt7996/mac.c b/mt7996/mac.c
+--- a/mt7996/mac.c
++++ b/mt7996/mac.c
+@@ -1097,7 +1097,7 @@ int mt7996_tx_prepare_skb(struct mt76_dev *mdev, void *txwi_ptr,
+ 	 * compatible with 802.11 EAPOL frame, we do the translation by
+ 	 * software
+ 	 */
+-	if (tx_info->skb->protocol == cpu_to_be16(ETH_P_PAE) && sta->mlo) {
++	if (sta && tx_info->skb->protocol == cpu_to_be16(ETH_P_PAE) && sta->mlo) {
+ 		struct ieee80211_hdr *hdr = (void *)tx_info->skb->data;
+ 		struct ieee80211_bss_conf *link_conf;
+ 		struct ieee80211_link_sta *link_sta;

@@ -34,9 +34,10 @@ readonly OPENWRT_COMMIT=""
 
 # --- Upstream PR: Cherry-pick on top ---
 # Remove the entry once the PR lands in master.
+# Entry forms:  <PR#>:<sha> ...   fetch the PR and cherry-pick the SHAs
+#               local:<path> ...  git am a pre-rebased patch (path relative to repo root)
 readonly OPENWRT_PICKS="
-24800:b05d134027 94e2bb1f05 32a2a980f6 106c3a86e4 85e1a8c58b 52f4e6bcce 394d741e6e
-local:openwrt-patches/staging/pr24800-cb2c5b1052-kernel-bump-6.18.50.rebased-ac2ed40b48.patch
+24800:b0633de183 06f8be5799 03f334b158 68c4e7a877 b41985a50d cb4180aafa 232bc754af 3255f20392 b3ccd1af88 03bc362061
 "
 # --- Directory and File Configuration ---
 readonly SOURCE_DEFAULT_CONFIG_DIR="config"
