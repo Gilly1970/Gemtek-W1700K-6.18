@@ -37,7 +37,7 @@ readonly OPENWRT_COMMIT=""
 # Entry forms:  <PR#>:<sha> ...   fetch the PR and cherry-pick the SHAs
 #               local:<path> ...  git am a pre-rebased patch (path relative to repo root)
 readonly OPENWRT_PICKS="
-24800:2f40ba313a 87630045aa 17213048bb 367c703152 ac9ecc4211 516a1f64c9 6bb8174333 9fa680bd79 27d37a32a3 7e9ad1ef8d b77289e534
+24800:98d78de8b8 19d39c429c 55107caf58 6ac727e594 6b55b723be 003fddae1f ca9c56e585 63486f3562 c251c01810 a1aea16617 09d2f49aa2
 "
 # --- Directory and File Configuration ---
 readonly SOURCE_DEFAULT_CONFIG_DIR="config"

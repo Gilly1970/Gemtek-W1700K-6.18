@@ -1,0 +1,27 @@
+#!/bin/sh
+
+# Re-apply packet steering when a network device is added.
+#
+# The packet_steering service is re-run on network/firewall config changes
+# and on netifd interface events. Devices that are created later, such as
+# WiFi interfaces set up by hostapd (including on every WiFi restart), raise
+# none of those and would keep the kernel default steering (rps_cpus=0)
+# until something else reloads it.
+
+[ "$ACTION" = add ] || exit 0
+
+DEV="${DEVICENAME:-$INTERFACE}"
+[ -n "$DEV" ] && [ -e "/sys/class/net/$DEV/device" ] || exit 0
+
+/etc/init.d/packet_steering enabled || exit 0
+
+# Coalesce a burst of new devices into a single run
+mkdir /var/run/packet-steering.pending 2>/dev/null || exit 0
+
+(
+	sleep 3
+	rmdir /var/run/packet-steering.pending
+	/etc/init.d/packet_steering reload
+) >/dev/null 2>&1 &
+
+exit 0
