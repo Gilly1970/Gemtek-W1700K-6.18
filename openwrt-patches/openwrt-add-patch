@@ -7,6 +7,7 @@ feeds/luci/modules/luci-mod-network/patches/997-luci-wireless-eht320-block-selec
 firmware/airoha/en7581_MT7996_npu_data.bin:target/linux/airoha/files/firmware/airoha/en7581_MT7996_npu_data.bin
 firmware/airoha/en7581_MT7996_npu_rv32.bin:target/linux/airoha/files/firmware/airoha/en7581_MT7996_npu_rv32.bin
 mac80211.sh:package/network/config/wifi-scripts/files-ucode/lib/netifd/wireless/mac80211.sh
+netifd-hotplug-20-packet-steering:package/network/config/netifd/files/etc/hotplug.d/net/20-packet-steering
 mt76-Makefile:package/kernel/mt76/Makefile
 package/firmware/wireless-regdb/patches/555-US-fix.patch
 package/firmware/wireless-regdb/patches/600-world-regd-6GHz.patch
@@ -62,6 +63,7 @@ target/linux/airoha/patches-6.18/976-net-airoha-enable-RX_DONE-interrupt-for-RX-
 target/linux/airoha/patches-6.18/977-net-airoha-hw-gro-v5-refinements.patch
 target/linux/airoha/patches-6.18/980-net-airoha-handle-RX_NO_CPU_DSCP-interrupt-not-just-RX_DONE.patch
 target/linux/airoha/patches-6.18/981-net-airoha-recover-RX-ring-after-hw-completion-stall.patch
+target/linux/airoha/patches-6.18/985-PCI-mediatek-gen3-request-port-IRQ-for-affinity-control.patch
 target/linux/airoha/patches-6.18/999-02-01-pmdomain-airoha-Add-Airoha-CPU-PM-Domain-support.patch
 target/linux/generic/backport-6.18/802-v7.1-net-dsa-mt7530-fix-CPU-port-VLAN-not-being-reset-to-unaware.patch
 target/linux/generic/backport-6.18/803-v7.1-net-dsa-mt7530-untag-VLAN-aware-bridge-PVID.patch

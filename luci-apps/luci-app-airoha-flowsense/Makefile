@@ -3,11 +3,11 @@
 include $(TOPDIR)/rules.mk
 
 PKG_VERSION:=1.1.9
-PKG_RELEASE:=5
+PKG_RELEASE:=7
 PKG_LICENSE:=Apache-2.0
 
 LUCI_TITLE:=LuCI Airoha FlowSense — Offload & PPE Monitor
-LUCI_DEPENDS:=+luci-base @TARGET_airoha
+LUCI_DEPENDS:=+luci-base +rpcd-mod-ucode +ucode-mod-fs +ucode-mod-ubus +ucode-mod-uci +ucode-mod-nl80211 @TARGET_airoha
 
 include ../../luci.mk
 
@@ -25,7 +25,7 @@ define Package/luci-app-airoha-flowsense/postinst
 # set) and online.
 chmod 0755 "$${IPKG_INSTROOT}/etc/init.d/npu-jitter" \
            "$${IPKG_INSTROOT}/usr/libexec/npu-jitter-daemon" \
-           "$${IPKG_INSTROOT}/usr/libexec/rpcd/luci.airoha_flowsense" 2>/dev/null
+           "$${IPKG_INSTROOT}/usr/share/luci-airoha-flowsense/backend.sh" 2>/dev/null
 [ -n "$${IPKG_INSTROOT}" ] || {
 	/etc/init.d/npu-jitter enable 2>/dev/null
 	/etc/init.d/npu-jitter restart 2>/dev/null
