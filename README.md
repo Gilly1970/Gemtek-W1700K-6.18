@@ -67,7 +67,8 @@ make dirclean                # Full clean including toolchain
 
 **Monitoring dashboard for:** Visual Hardware Offload & PPE Performance Monitor for the Gemtek W1700K (Airoha AN7581 / MT7996).
 
-<img width="780" height="842" alt="image" src="https://github.com/user-attachments/assets/5b8539bb-1aaf-4d30-b7b1-69cffaf22dea" />
+<img width="1215" height="700" alt="FlowSense" src="https://github.com/user-attachments/assets/6411e7d3-6070-4f87-8b58-2151616ccfac" />
+
 
 
 ## Enable and start the flowsense service
