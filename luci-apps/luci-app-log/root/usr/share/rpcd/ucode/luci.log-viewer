@@ -56,7 +56,8 @@ const methods = {
 		call: function(request) {
 			let ret    = '';
 			const path = request.args?.fpath;
-			if(path) {
+			const logDir = '/var/log/';
+			if(path && index(path, '..') == -1 && substr(path, 0, length(logDir)) === logDir) {
 				ret = stat(path)?.size;
 			}
 			return { 'bytes': ret ?? '' };
