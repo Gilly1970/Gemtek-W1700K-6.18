@@ -74,11 +74,11 @@ make dirclean                # Full clean including toolchain
 ## Enable and start the flowsense service
 
 ```bash
-chmod +x /usr/libexec/rpcd/luci.airoha_flowsense
 chmod +x /etc/init.d/npu-jitter
 chmod +x /usr/libexec/npu-jitter-daemon
+chmod +x /usr/share/luci-airoha-flowsense/backend.sh
 /etc/init.d/npu-jitter enable
-/etc/init.d/npu-jitter start
+/etc/init.d/npu-jitter restart
 /etc/init.d/rpcd restart
 ```
 ## Configuration
@@ -91,6 +91,12 @@ config jitter 'settings'
 ```
 
 Change `ping_target` to any reachable upstream host for latency monitoring.
+
+```
+uci set npu-monitor.jitter.target='192.0.2.1'
+uci commit npu-monitor
+/etc/init.d/npu-jitter restart
+```
 
 ---
 

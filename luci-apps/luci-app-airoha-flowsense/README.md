@@ -68,22 +68,18 @@ Hardware registers read directly via `devmem`: PSE port queues, GDM/CDM counters
 
 ### Required Tools
 
-The RPC backend shell script (`/usr/libexec/rpcd/luci.airoha_flowsense`) requires the following tools to be present on the router:
+The RPC backend is a ucode plugin (`/usr/share/rpcd/ucode/luci.airoha_flowsense.uc`) that runs inside rpcd via `rpcd-mod-ucode`. WiFi stats come from `ucode-mod-nl80211`, ubus/UCI from the ucode modules, and ARP/route/interface data straight from procfs/sysfs, so `iw`, `ip`, `jsonfilter` and the `ubus`/`uci` CLIs are no longer needed. The remaining external tools are:
 
 | Tool | Package | Purpose |
 |------|---------|---------|
-| `iw` | `iw` | WiFi interface enumeration and per-station stats |
-| `ip` | `ip-full` | Neighbor table, interface stats, route detection (AP mode) |
-| `bridge` | `bridge-utils` | Bridge FDB and forwarding stats |
+| `devmem` | *(busybox)* | Direct hardware register reads (PSE/GDM/CDM/PLL) |
+| `bridge` | `ip-bridge` | Bridge FDB (per-port client MACs) |
 | `tc` | `tc` | Detect CAKE/SQM shaper (conflict alert) |
-| `nft` | `nftables` | Read fw4 flowtable members |
-| `devmem` | `devmem` | Direct hardware register reads (PSE/GDM/CDM/PLL) |
-| `ubus` | *(built-in)* | WAN interface status queries |
-| `uci` | *(built-in)* | Read/write offload and firewall config |
-| `jsonfilter` | `jsonfilter` | JSON extraction from ubus output |
 | `strings` | `binutils` | NPU firmware version parsing |
-| `ping` | *(built-in)* | Jitter daemon upstream latency measurement |
-| `awk` / `sed` / `grep` | *(busybox)* | Text processing throughout |
+| `dmesg` | *(busybox)* | NPU reserved-memory regions (read once, cached) |
+| `ping` | *(busybox)* | Jitter daemon upstream latency measurement |
+
+Each is optional: if one is missing, only the field it feeds reports as unavailable.
 
 ---
 
@@ -93,8 +89,8 @@ The RPC backend shell script (`/usr/libexec/rpcd/luci.airoha_flowsense`) require
 Kernel / Hardware
   debugfs · sysfs · procfs · devmem registers
         |
-  /usr/libexec/rpcd/luci.airoha_flowsense   (RPC backend shell script)
-  /usr/libexec/npu-jitter-daemon            (background latency daemon)
+  /usr/share/rpcd/ucode/luci.airoha_flowsense.uc   (RPC backend, ucode, runs inside rpcd)
+  /usr/libexec/npu-jitter-daemon                   (background latency daemon)
         |
   ubus / rpcd transport
         |
@@ -157,12 +153,33 @@ old form as `npu-monitor.@jitter[0].target`.
 
 ## Package Info
 
-- **Version**: 1.1.5-1
+- **Version**: 1.1.9-7
 - **License**: Apache-2.0
 - **Target**: `airoha` only (`@TARGET_airoha`)
-- **LuCI dependency**: `luci-base`
+- **Dependencies**: `luci-base`, `rpcd-mod-ucode`, `ucode-mod-fs`, `ucode-mod-ubus`, `ucode-mod-uci`, `ucode-mod-nl80211`
 - **Config file**: `/etc/config/npu-monitor`
-- **Init script**: `/etc/init.d/npu-jitter` (started/restarted on package install)
+- **Init script**: `/etc/init.d/npu-jitter`
+- **Debug fallback**: `/usr/share/luci-airoha-flowsense/backend.sh` — the old shell backend, kept for manual debugging only; nothing calls it
+
+## Installation
+
+Install the package with `apk add`. The post-install script does all the setup: it sets +x on the init script, daemon and `backend.sh`, enables and restarts `npu-jitter`, clears the LuCI caches and restarts rpcd. No manual `chmod`/`enable` steps are needed.
+
+**Upgrading from the shell-backend releases (≤ r6):** if the old backend was ever copied onto the router by hand rather than installed from the package, remove it. Otherwise it registers the same `luci.airoha_flowsense` ubus object as the ucode plugin:
+
+```sh
+rm -f /usr/libexec/rpcd/luci.airoha_flowsense
+/etc/init.d/rpcd restart
+```
+
+**Manual install (copying files without apk):** the ucode plugin needs no +x, but the rest does:
+
+```sh
+chmod +x /etc/init.d/npu-jitter /usr/libexec/npu-jitter-daemon /usr/share/luci-airoha-flowsense/backend.sh
+/etc/init.d/npu-jitter enable
+/etc/init.d/npu-jitter restart
+/etc/init.d/rpcd restart
+```
 
 ## Bugs
 
