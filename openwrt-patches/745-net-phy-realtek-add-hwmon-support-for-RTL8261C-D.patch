@@ -1,0 +1,31 @@
+From: Gilly1970 <gilroyscott1970@gmail.com>
+Subject: [PATCH] net: phy: realtek: add hwmon support for RTL8261C/D
+
+The RTL8261C/D family exposes the same thermal sensor block as the
+RTL822x: TSALRM at VEND2 0xa662, TSRR at 0xbd84 as a signed 10-bit
+half-degree Celsius value, and the downshift threshold at 0xb54c. The
+Realtek vendor RTL8261CE driver reads the temperature from TSRR with
+the same decode as rtl822x_hwmon_read().
+
+Register the existing RTL822x hwmon device from rtl8261x_probe() so the
+10G ports of the Gemtek W1700K keep reporting their PHY temperature
+when they carry an RTL8261CE, as the RTL8261N does.
+
+temp1_max is unverified on this family: the vendor driver decodes the
+threshold from bit 7 of 0xb54c in whole degrees, the RTL822x helper
+from bit 6 in half degrees.
+
+Signed-off-by: Gilly1970 <gilroyscott1970@gmail.com>
+---
+--- a/drivers/net/phy/realtek/realtek_main.c
++++ b/drivers/net/phy/realtek/realtek_main.c
+@@ -449,6 +449,9 @@
+ 		return -ENODEV;
+ 	}
+ 
++	if (IS_ENABLED(CONFIG_REALTEK_PHY_HWMON))
++		return rtl822x_hwmon_init(phydev);
++
+ 	return 0;
+ }
+ 

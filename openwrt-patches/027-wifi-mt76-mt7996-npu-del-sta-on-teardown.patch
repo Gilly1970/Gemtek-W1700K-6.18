@@ -11,10 +11,16 @@ flowtable offload on the W1700K across client reconnects.
 
 The handler indexes icv_error_table[wcid] (0x402 words, one per wcid, bits
 per TID) SRAM the RRO/RX hardware consults directly (no CPU read path in
-the firmware, which is why a stale entry is invisible yet fatal). On
-teardown we issue CLEAR for every TID (0..7) of the departing wcid, zeroing
-its word. CLEAR touches only that wcid's word, so it can never disturb
-another active station.
+the firmware, which is why a stale entry is invisible yet fatal). The NPU
+firmware validates tid <= NPU_WIFI_RRO_TID_MAXIMUM (8), i.e. TIDs 0..8 are
+live bits (0..7 QoS data + 8 = non-QoS/management). PMF-protected management
+frames (deauth / SA Query / action) land on TID 8, so a WPA3/PMF client
+(macOS/iOS) that hits an ICV error around disconnect/rekey latches bit 8 -
+which an earlier 0..7 sweep left behind, re-poisoning the reused wcid with an
+RX black-hole. On teardown we now issue CLEAR for every live TID (0..8) of
+the departing wcid, zeroing its word. CLEAR touches only that wcid's word, so
+it can never disturb another active station; the loop is best-effort per TID
+so a transient mailbox failure on one TID never skips the rest (esp. TID 8).
 
 Uses the same rcu_read_lock() + GFP_ATOMIC pattern as the existing runtime
 NPU calls (mt76_npu_send_txrx_addr / rx_poll_complete).
@@ -78,7 +84,7 @@ index b8006b8..737d619 100644
 + * bridger/flowtable on the W1700K.
 + */
 +#define MT7996_NPU_STA_BITMAP_CLEAR	1
-+#define MT7996_NPU_STA_TID_COUNT	9
++#define MT7996_NPU_STA_TID_COUNT	9	/* TIDs 0..8; 8 = non-QoS/mgmt (PMF) */
 +
 +void mt7996_npu_sta_remove(struct mt7996_dev *dev, struct mt76_wcid *wcid)
 +{

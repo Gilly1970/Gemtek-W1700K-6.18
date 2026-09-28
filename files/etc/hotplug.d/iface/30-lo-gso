@@ -1,0 +1,25 @@
+#!/bin/sh
+
+# Raise the loopback GSO size limit from the 64 KiB legacy default to
+# GSO_MAX_SIZE (512 KiB). Runtime equivalent of fanboy's kernel patch
+# 670-net-loopback-raise-the-gso-size-limit, kept here instead of as a patch.
+#
+# The 64 KiB ceiling exists for hardware NICs (descriptor/DMA limits);
+# loopback has neither. Letting TCP build 512 KiB super-packets on lo cuts
+# per-packet overhead (measured on the W1700K: 3.26 -> 4.19 Gbit/s loopback).
+# Only lo is touched; no other interface or real traffic is affected.
+#
+# Needs full iproute2 (ip-full) - busybox ip does not know these keywords.
+# Runs on every loopback ifup so it survives network restarts; the guard
+# makes repeats a no-op.
+
+[ "$ACTION" = "ifup" ] && [ "$INTERFACE" = "loopback" ] || exit 0
+
+SIZE=524280
+[ "$(cat /sys/class/net/lo/gso_max_size 2>/dev/null)" = "$SIZE" ] && exit 0
+
+if ip link set dev lo gso_max_size "$SIZE" gso_ipv4_max_size "$SIZE" 2>/dev/null; then
+	logger -t lo-gso "loopback gso_max_size set to $SIZE"
+else
+	logger -t lo-gso "failed to raise loopback gso_max_size (ip-full missing?)"
+fi

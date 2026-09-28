@@ -1,4 +1,4 @@
-From: Slavin Liu <bolin.liu@seu.edu.cn>
+From: Gilly <gilroyscott1970@gmail.com>
 Date: Sun, 13 Sep 2026 00:00:00 +0000
 Subject: [PATCH] wifi: mt76: mt7996: guard NULL sta on the EAPOL TX path
 
@@ -14,7 +14,7 @@ The data-QoS MLO link selection earlier in the function already checks sta
 at our mt76 pin; this is the remaining unguarded half of the upstream RFC
 "wifi: mt76: mt7996: guard station-only MLO TX handling".
 
-Signed-off-by: Slavin Liu <bolin.liu@seu.edu.cn>
+Signed-off-by: Gilly <gilroyscott1970@gmail.com>
 ---
 diff --git a/mt7996/mac.c b/mt7996/mac.c
 --- a/mt7996/mac.c

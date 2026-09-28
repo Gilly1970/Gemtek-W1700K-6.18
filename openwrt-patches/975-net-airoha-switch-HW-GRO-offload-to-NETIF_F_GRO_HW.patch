@@ -1,10 +1,17 @@
-From: Gilly1970 <gilroyscott@hotmail.com>
+From: Gemtek W1700K tree <local>
 Date: Fri, 1 Aug 2026 00:00:00 +0000
 Subject: [PATCH] net: airoha: switch HW GRO offload to NETIF_F_GRO_HW
 
-Finish the migration of the airoha HW GRO/LRO offload (in-tree 916-02 
-plus 920-1x rework. Equivalent to Lorenzo's v3 "add HW GRO offload support".
+Finish the migration of the airoha HW GRO/LRO offload (in-tree 916-02 +
+920-1x reworks) to the net-next v3 form: advertise the offload as the
+forwarding-safe NETIF_F_GRO_HW instead of NETIF_F_LRO (LRO is force-
+disabled by the stack on bridged/routed ports), move the LRO-capable
+rx-queue selection to the high queues (24-31), reject open on a shared
+QDMA when this device already has HW GRO in its feature set, skip HW
+programming while the netdev is down, and tighten the zero-payload
+segment check. Equivalent to Lorenzo's v3 "add HW GRO offload support".
 
+Signed-off-by: local <local>
 ---
 --- a/drivers/net/ethernet/airoha/airoha_eth.h
 +++ b/drivers/net/ethernet/airoha/airoha_eth.h
