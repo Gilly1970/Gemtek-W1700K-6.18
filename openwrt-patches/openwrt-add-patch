@@ -70,6 +70,5 @@ target/linux/generic/pending-6.18/675-06-nft_flow_offload-bridge-vlan-context.pa
 target/linux/generic/pending-6.18/745-net-phy-realtek-add-hwmon-support-for-RTL8261C-D.patch
 target/linux/generic/pending-6.18/802-OPP-Provide-old-opp-to-config_clks-on-_set_opp.patch
 target/linux/generic/pending-6.18/993-net-gro-fix-nesting-of-TCP-GSO-skbs-in-skb_gro_receive_list.patch
-### 2026-09-28: 6.18.54 stable pick (flowtable ct UAF), synced from HW.2.1. DROP at 6.18.54+.
 target/linux/generic/pending-6.18/994-netfilter-flowtable-hold-reference-on-ct-until-flow-is-released.patch
 wifi-scripts-Makefile:package/network/config/wifi-scripts/Makefile
