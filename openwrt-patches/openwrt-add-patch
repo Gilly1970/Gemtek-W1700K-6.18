@@ -55,7 +55,6 @@ target/linux/airoha/patches-6.18/963-net-airoha-fix-MIB-stats-collection-to-be-l
 target/linux/airoha/patches-6.18/972-net-airoha-sync-UPDMEM-source-MAC-for-offloaded-IPv6.patch
 target/linux/airoha/patches-6.18/973-net-airoha-UPDMEM-slot-allocator-for-IPv6-source-MACs.patch
 target/linux/airoha/patches-6.18/975-net-airoha-switch-HW-GRO-offload-to-NETIF_F_GRO_HW.patch
-target/linux/airoha/patches-6.18/976-net-airoha-enable-RX_DONE-interrupt-for-RX-queue-31.patch
 target/linux/airoha/patches-6.18/977-net-airoha-hw-gro-v5-refinements.patch
 target/linux/airoha/patches-6.18/980-net-airoha-handle-RX_NO_CPU_DSCP-interrupt-not-just-RX_DONE.patch
 target/linux/airoha/patches-6.18/981-net-airoha-recover-RX-ring-after-hw-completion-stall.patch
@@ -69,6 +68,4 @@ target/linux/generic/pending-6.18/675-05-nft_flow_offload-add-bridging-support.p
 target/linux/generic/pending-6.18/675-06-nft_flow_offload-bridge-vlan-context.patch
 target/linux/generic/pending-6.18/745-net-phy-realtek-add-hwmon-support-for-RTL8261C-D.patch
 target/linux/generic/pending-6.18/802-OPP-Provide-old-opp-to-config_clks-on-_set_opp.patch
-target/linux/generic/pending-6.18/993-net-gro-fix-nesting-of-TCP-GSO-skbs-in-skb_gro_receive_list.patch
-target/linux/generic/pending-6.18/994-netfilter-flowtable-hold-reference-on-ct-until-flow-is-released.patch
 wifi-scripts-Makefile:package/network/config/wifi-scripts/Makefile

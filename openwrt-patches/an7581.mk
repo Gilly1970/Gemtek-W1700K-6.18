@@ -111,7 +111,7 @@ define Device/gemtek_w1700k-ubi2
   SUPPORTED_DEVICES := gemtek,w1700k-ubi gemtek_w1700k-ubi gemtek_w1700k-ubi2
   DEVICE_PACKAGES := airoha-en7581-mt7996-npu-firmware \
 		    fitblk kmod-hwmon-nct7802 \
-		    kmod-mt7996-firmware kmod-phy-realtek rtl826x-firmware rtl8261c-firmware \
+		    kmod-mt7996-firmware kmod-phy-realtek rtl826x-firmware \
 		    wpad-mbedtls
   UBINIZE_OPTS := -E 5
   BLOCKSIZE := 128k
