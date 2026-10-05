@@ -1,24 +1,32 @@
-From: Lorenzo Bianconi <lorenzo@kernel.org>
-Subject: [PATCH net-next v4] net: airoha: Add retry mechanism to airoha_qdma_set_trtcm_param
+From: Leto Liu (刘涛) <Leto.Liu@airoha.com>
+Date: Wed, 30 Sep 2026 08:58:48 +0200
+Subject: [PATCH net v6] net: airoha: Add retry mechanism to
+ airoha_qdma_set_trtcm_param()
 
-Replace the single write + RW_DONE poll in airoha_qdma_set_trtcm_param()
-with a write-and-verify retry loop. The hardware can silently fail to
-commit a TRTCM parameter write (RW_DONE asserts but the stored value
-differs from what was written), so wait for RW_DONE, verify the readback
-matches, and retry up to 100 times before returning an error.
+CPU accesses QDMA via the bus. When multiple modules are using the bus
+simultaneously, CPU access to QDMA may encounter bus timeouts and fails,
+resulting in QDMA configuration failures and potentially causing packet
+transmission issues. In order to mitigate the issue, introduce a retry
+mechanism to airoha_qdma_set_trtcm_param routine in order to ensure the
+configuration is correctly applied to the hardware.
 
-v4: add a wmb() after the CFG_PARAM trigger write, and retry (rather than
-bail with -ETIMEDOUT) when the RW_DONE poll times out so the retry loop
-also covers the timeout path.
+It's enough to try a second time for the TRTCM config to be actually
+applied to make sure we are not in the middle of bucket handling as it does
+operate on fixed time slot internally.
 
-Signed-off-by: Lorenzo Bianconi <lorenzo@kernel.org>
+Fixes: ef1ca9271313b ("net: airoha: Add sched HTB offload support")
+Signed-off-by: Leto Liu (刘涛) <Leto.Liu@airoha.com>
+[ improve commit description, drop memory block, apply better loop logic]
+Signed-off-by: Christian Marangi <ansuelsmth@gmail.com>
+Link: https://patchwork.kernel.org/project/linux-mediatek/patch/20260930065855.46171-1-ansuelsmth@gmail.com/
 ---
- drivers/net/ethernet/airoha/airoha_eth.c | 27 ++++++++++++++++++------
- 1 file changed, 24 insertions(+), 3 deletions(-)
+ drivers/net/ethernet/airoha/airoha_eth.c | 32 +++++++++++++++++++-----
+ drivers/net/ethernet/airoha/airoha_eth.h |  2 ++
+ 2 files changed, 28 insertions(+), 6 deletions(-)
 
 --- a/drivers/net/ethernet/airoha/airoha_eth.c
 +++ b/drivers/net/ethernet/airoha/airoha_eth.c
-@@ -3089,14 +3089,31 @@
+@@ -3217,14 +3217,34 @@
  		     FIELD_PREP(TRTCM_METER_GROUP_MASK, group) |
  		     FIELD_PREP(TRTCM_PARAM_INDEX_MASK, idx) |
  		     FIELD_PREP(TRTCM_PARAM_RATE_TYPE_MASK, mode);
@@ -26,7 +34,12 @@ Signed-off-by: Lorenzo Bianconi <lorenzo@kernel.org>
  
 -	airoha_qdma_wr(qdma, REG_TRTCM_DATA_LOW(addr), val);
 -	airoha_qdma_wr(qdma, REG_TRTCM_CFG_PARAM(addr), config);
-+	for (i = 0; i < 100; i++) {
++	/*
++	 * HW might be in the middle of bucket handling and might
++	 * require an additional try to actually apply the new TRTCM
++	 * config.
++	 */
++	for (i = 0; i < TRTCM_CONFIG_RETRY_MAX; i++) {
 +		u32 data = 0;
  
 -	return read_poll_timeout(airoha_qdma_rr, val,
@@ -34,9 +47,7 @@ Signed-off-by: Lorenzo Bianconi <lorenzo@kernel.org>
 -				 USEC_PER_MSEC, 10 * USEC_PER_MSEC, true,
 -				 qdma, REG_TRTCM_CFG_PARAM(addr));
 +		airoha_qdma_wr(qdma, REG_TRTCM_DATA_LOW(addr), val);
-+		wmb();
 +		airoha_qdma_wr(qdma, REG_TRTCM_CFG_PARAM(addr), config);
-+		wmb();
 +
 +		if (read_poll_timeout(airoha_qdma_rr, data,
 +				      data & TRTCM_PARAM_RW_DONE_MASK,
@@ -56,3 +67,14 @@ Signed-off-by: Lorenzo Bianconi <lorenzo@kernel.org>
  }
  
  static int airoha_qdma_set_trtcm_config(struct airoha_qdma *qdma, int channel,
+--- a/drivers/net/ethernet/airoha/airoha_eth.h
++++ b/drivers/net/ethernet/airoha/airoha_eth.h
+@@ -184,6 +184,8 @@
+ #define TRTCM_TOKEN_RATE_MASK			GENMASK(23, 6)
+ #define TRTCM_TOKEN_RATE_FRACTION_MASK		GENMASK(5, 0)
+ 
++#define TRTCM_CONFIG_RETRY_MAX			2
++
+ struct airoha_queue_entry {
+ 	union {
+ 		void *buf;
