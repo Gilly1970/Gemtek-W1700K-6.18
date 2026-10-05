@@ -1,0 +1,87 @@
+From: Gilly1970 <gilroyscott1970@gmail.com>
+Subject: [PATCH] PCI: mediatek-gen3: request the port IRQ instead of chaining it
+
+Every MSI of a port (on the W1700K: mt7996e on 1fc00000.pcie and
+mt7996e-hif on 1fc40000.pcie) is demultiplexed from a single GIC SPI.
+MSI_FLAG_NO_AFFINITY makes the per-MSI affinity read-only, and a chained
+parent interrupt has no /proc/irq entry, so every Wi-Fi hardirq and the
+mt7996 IRQ tasklet are stuck on CPU0.
+
+Request the port interrupt with request_irq() instead. It then appears as
+"<addr>.pcie" in /proc/interrupts, and writing /proc/irq/<n>/smp_affinity
+moves the whole port. IRQF_NO_SUSPEND keeps the chained-handler behaviour
+across system suspend, IRQF_NO_THREAD keeps it in hardirq context.
+
+---
+--- a/drivers/pci/controller/pcie-mediatek-gen3.c	2026-09-15 18:48:39.596227791 +1000
++++ b/drivers/pci/controller/pcie-mediatek-gen3.c	2026-09-15 18:48:39.611228301 +1000
+@@ -10,10 +10,10 @@
+ #include <linux/clk.h>
+ #include <linux/clk-provider.h>
+ #include <linux/delay.h>
++#include <linux/interrupt.h>
+ #include <linux/iopoll.h>
+ #include <linux/irq.h>
+ #include <linux/irqchip/irq-msi-lib.h>
+-#include <linux/irqchip/chained_irq.h>
+ #include <linux/irqdomain.h>
+ #include <linux/kernel.h>
+ #include <linux/mfd/syscon.h>
+@@ -794,7 +794,7 @@
+ 
+ static void mtk_pcie_irq_teardown(struct mtk_gen3_pcie *pcie)
+ {
+-	irq_set_chained_handler_and_data(pcie->irq, NULL, NULL);
++	free_irq(pcie->irq, pcie);
+ 
+ 	if (pcie->intx_domain)
+ 		irq_domain_remove(pcie->intx_domain);
+@@ -827,15 +827,12 @@
+ 	} while (true);
+ }
+ 
+-static void mtk_pcie_irq_handler(struct irq_desc *desc)
++static irqreturn_t mtk_pcie_irq_handler(int irq, void *data)
+ {
+-	struct mtk_gen3_pcie *pcie = irq_desc_get_handler_data(desc);
+-	struct irq_chip *irqchip = irq_desc_get_chip(desc);
++	struct mtk_gen3_pcie *pcie = data;
+ 	unsigned long status;
+ 	irq_hw_number_t irq_bit = PCIE_INTX_SHIFT;
+ 
+-	chained_irq_enter(irqchip, desc);
+-
+ 	status = readl_relaxed(pcie->base + PCIE_INT_STATUS_REG);
+ 	for_each_set_bit_from(irq_bit, &status, PCI_NUM_INTX +
+ 			      PCIE_INTX_SHIFT)
+@@ -850,7 +847,7 @@
+ 		writel_relaxed(BIT(irq_bit), pcie->base + PCIE_INT_STATUS_REG);
+ 	}
+ 
+-	chained_irq_exit(irqchip, desc);
++	return IRQ_HANDLED;
+ }
+ 
+ static int mtk_pcie_setup_irq(struct mtk_gen3_pcie *pcie)
+@@ -867,7 +864,20 @@
+ 	if (err)
+ 		return err;
+ 
+-	irq_set_chained_handler_and_data(pcie->irq, mtk_pcie_irq_handler, pcie);
++	/*
++	 * Request the port interrupt instead of chaining it, so it shows up in
++	 * /proc/irq and its CPU affinity can be set from userspace. MSIs cannot
++	 * carry their own affinity (they are all demultiplexed from this one
++	 * line), but moving this line moves every MSI and INTx of the port.
++	 */
++	err = request_irq(pcie->irq, mtk_pcie_irq_handler,
++			  IRQF_NO_THREAD | IRQF_NO_SUSPEND, dev_name(dev), pcie);
++	if (err) {
++		dev_err(dev, "failed to request IRQ %d: %d\n", pcie->irq, err);
++		irq_domain_remove(pcie->intx_domain);
++		irq_domain_remove(pcie->msi_bottom_domain);
++		return err;
++	}
+ 
+ 	return 0;
+ }
