@@ -1,0 +1,97 @@
+From: Gilly <gilroyscott1970@gmail.com>
+Date: Tue, 6 Oct 2026 00:00:00 +0000
+Subject: [PATCH] TEST: wifi: mt76: mt7996: align and resend beacon template uploads
+
+Test patch for openwrt/openwrt#25549 (beacons sent with an all-zero body
+for ~6 s on AN7581 + MT7996). Not for merging.
+
+Signed-off-by: Gilly <gilroyscott1970@gmail.com>
+---
+diff --git a/mt7996/mcu.c b/mt7996/mcu.c
+index 1d2ecd9..6d3c05f 100644
+--- a/mt7996/mcu.c
++++ b/mt7996/mcu.c
+@@ -108,6 +108,14 @@ static bool sr_scene_detect = true;
+ module_param(sr_scene_detect, bool, 0644);
+ MODULE_PARM_DESC(sr_scene_detect, "Enable firmware scene detection algorithm");
+ 
++static bool beacon_dma_align = true;
++module_param(beacon_dma_align, bool, 0644);
++MODULE_PARM_DESC(beacon_dma_align, "Align beacon MCU commands to 64 bytes for DMA");
++
++static bool beacon_resend = true;
++module_param(beacon_resend, bool, 0644);
++MODULE_PARM_DESC(beacon_resend, "Upload each beacon template twice");
++
+ static u8
+ mt7996_mcu_get_sta_nss(u16 mcs_map)
+ {
+@@ -3364,8 +3372,35 @@ mt7996_mcu_beacon_cont(struct mt7996_dev *dev,
+ 	memcpy(buf + MT_TXD_SIZE, skb->data, skb->len);
+ }
+ 
+-int mt7996_mcu_add_beacon(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
+-			  struct ieee80211_bss_conf *link_conf, bool enabled)
++static struct sk_buff *
++mt7996_mcu_alloc_bcn_req(struct mt76_dev *dev, struct mt76_vif_link *mlink,
++			 int len)
++{
++	struct bss_req_hdr hdr = {
++		.bss_idx = mlink->idx,
++	};
++	struct sk_buff *skb;
++	unsigned long txd;
++
++	if (!beacon_dma_align)
++		return __mt7996_mcu_alloc_bss_req(dev, mlink, len);
++
++	skb = mt76_mcu_msg_alloc(dev, NULL, len + 64);
++	if (!skb)
++		return ERR_PTR(-ENOMEM);
++
++	/* uni txd is pushed in front of skb->data at send time */
++	txd = (unsigned long)skb->data -
++	      sizeof(struct mt76_connac2_mcu_uni_txd);
++	skb_reserve(skb, ALIGN(txd, 64) - txd);
++	skb_put_data(skb, &hdr, sizeof(hdr));
++
++	return skb;
++}
++
++static int
++mt7996_mcu_send_beacon(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
++		       struct ieee80211_bss_conf *link_conf, bool enabled)
+ {
+ 	struct mt7996_dev *dev = mt7996_hw_dev(hw);
+ 	struct mt7996_vif_link *link = mt7996_vif_conf_link(dev, vif, link_conf);
+@@ -3387,8 +3422,8 @@ int mt7996_mcu_add_beacon(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
+ 	if (mphy && mphy->offchannel)
+ 		enabled = false;
+ 
+-	rskb = __mt7996_mcu_alloc_bss_req(&dev->mt76, mlink,
+-					  MT7996_MAX_BSS_OFFLOAD_SIZE);
++	rskb = mt7996_mcu_alloc_bcn_req(&dev->mt76, mlink,
++					MT7996_MAX_BSS_OFFLOAD_SIZE);
+ 	if (IS_ERR(rskb))
+ 		return PTR_ERR(rskb);
+ 
+@@ -3429,6 +3464,19 @@ out:
+ 				     MCU_WMWA_UNI_CMD(BSS_INFO_UPDATE), true);
+ }
+ 
++int mt7996_mcu_add_beacon(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
++			  struct ieee80211_bss_conf *link_conf, bool enabled)
++{
++	int ret;
++
++	ret = mt7996_mcu_send_beacon(hw, vif, link_conf, enabled);
++	if (ret || !enabled || !beacon_resend ||
++	    link_conf->csa_active || link_conf->color_change_active)
++		return ret;
++
++	return mt7996_mcu_send_beacon(hw, vif, link_conf, true);
++}
++
+ int mt7996_mcu_beacon_inband_discov(struct mt7996_dev *dev,
+ 				    struct ieee80211_bss_conf *link_conf,
+ 				    struct mt7996_vif_link *link, u32 changed)
