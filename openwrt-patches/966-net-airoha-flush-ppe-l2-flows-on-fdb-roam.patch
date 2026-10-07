@@ -1,0 +1,160 @@
+From: Gilly1970 <gilroyscott@hotmail.com>
+Subject: [PATCH] net: airoha: flush stale PPE L2 flows on bridge FDB roam
+
+When a bridged client roams between ports (e.g. WiFi radio to radio), the
+AN7581 PPE can keep an L2 offload entry pointing at the old egress port,
+black-holing downlink traffic until the entry ages out. The offload-layer
+destroy only fully tears down when it hits the FLOW_TYPE_L2 parent; a stale
+parent left in ppe->l2_flows is re-learned by airoha_ppe_foe_insert_entry().
+
+Register a switchdev FDB_DEL notifier and, from a workqueue, flush the L2
+parent(s) matching the roamed MAC via airoha_ppe_foe_flow_remove_entry()
+(which removes parent + all subflows). MAC-scoped, no whole-flowtable flush.
+
+EXPERIMENTAL - soak-test candidate for the roam black-hole. Enable dynamic
+debug on airoha_ppe.c to trace roam flushes.
+---
+--- a/drivers/net/ethernet/airoha/airoha_eth.h
++++ b/drivers/net/ethernet/airoha/airoha_eth.h
+@@ -623,6 +623,9 @@
+ 
+ 	struct rhashtable l2_flows;
+ 
++	struct notifier_block fdb_nb;
++	struct workqueue_struct *fdb_wq;
++
+ 	struct hlist_head *foe_flow;
+ 	u16 *foe_check_time;
+ 
+--- a/drivers/net/ethernet/airoha/airoha_ppe.c
++++ b/drivers/net/ethernet/airoha/airoha_ppe.c
+@@ -13,6 +13,8 @@
+ #include <linux/if_vlan.h>
+ #include <net/pkt_cls.h>
+ #include <net/route.h>
++#include <net/switchdev.h>
++#include <linux/etherdevice.h>
+ 
+ #include "airoha_regs.h"
+ #include "airoha_eth.h"
+@@ -1629,6 +1631,85 @@
+ }
+ EXPORT_SYMBOL_GPL(airoha_ppe_start_offload);
+ 
++static bool airoha_ppe_l2_entry_match_mac(const struct airoha_flow_table_entry *e,
++					  const u8 *mac)
++{
++	const struct airoha_foe_bridge *br = &e->data.bridge;
++
++	return (br->dest_mac_hi == get_unaligned_be32(mac) &&
++		br->dest_mac_lo == get_unaligned_be16(mac + 4)) ||
++	       (br->src_mac_hi == get_unaligned_be16(mac) &&
++		br->src_mac_lo == get_unaligned_be32(mac + 2));
++}
++
++/* Tear down the stale PPE L2 parent(s) for a roamed MAC. Reusing
++ * airoha_ppe_foe_flow_remove_entry() on the FLOW_TYPE_L2 parent also drops
++ * every subflow, so the PPE cannot re-learn the old redirect after the BIND
++ * ages out.
++ */
++static void airoha_ppe_foe_flush_l2_mac(struct airoha_ppe *ppe, const u8 *mac)
++{
++	struct airoha_flow_table_entry *e;
++	struct rhashtable_iter iter;
++
++	rhashtable_walk_enter(&ppe->l2_flows, &iter);
++	rhashtable_walk_start(&iter);
++	while ((e = rhashtable_walk_next(&iter)) != NULL) {
++		if (IS_ERR(e))
++			continue;
++		if (!airoha_ppe_l2_entry_match_mac(e, mac))
++			continue;
++		pr_info("airoha_ppe: FDB roam flush L2 flow for mac=%pM\n", mac);
++		/* remove_entry takes ppe_lock and mutates l2_flows: leave the
++		 * walk's RCU section around it, then resync the iterator.
++		 */
++		rhashtable_walk_stop(&iter);
++		airoha_ppe_foe_flow_remove_entry(ppe, e);
++		rhashtable_walk_start(&iter);
++	}
++	rhashtable_walk_stop(&iter);
++	rhashtable_walk_exit(&iter);
++}
++
++struct airoha_ppe_fdb_work {
++	struct work_struct work;
++	struct airoha_ppe *ppe;
++	u8 mac[ETH_ALEN];
++};
++
++static void airoha_ppe_fdb_work_fn(struct work_struct *work)
++{
++	struct airoha_ppe_fdb_work *fw =
++		container_of(work, struct airoha_ppe_fdb_work, work);
++
++	airoha_ppe_foe_flush_l2_mac(fw->ppe, fw->mac);
++	kfree(fw);
++}
++
++static int airoha_ppe_fdb_event(struct notifier_block *nb,
++				unsigned long event, void *ptr)
++{
++	struct airoha_ppe *ppe = container_of(nb, struct airoha_ppe, fdb_nb);
++	struct switchdev_notifier_fdb_info *fdb = ptr;
++	struct airoha_ppe_fdb_work *fw;
++
++	if (event != SWITCHDEV_FDB_DEL_TO_DEVICE || !fdb || !fdb->addr)
++		return NOTIFY_DONE;
++	if (fdb->is_local || is_multicast_ether_addr(fdb->addr))
++		return NOTIFY_DONE;
++
++	fw = kzalloc(sizeof(*fw), GFP_ATOMIC);
++	if (!fw)
++		return NOTIFY_DONE;
++
++	fw->ppe = ppe;
++	ether_addr_copy(fw->mac, fdb->addr);
++	INIT_WORK(&fw->work, airoha_ppe_fdb_work_fn);
++	queue_work(ppe->fdb_wq, &fw->work);
++
++	return NOTIFY_DONE;
++}
++
+ int airoha_ppe_init(struct airoha_eth *eth)
+ {
+ 	int foe_size, err, ppe_num_stats_entries;
+@@ -1690,8 +1771,23 @@
+ 	if (err)
+ 		goto error_l2_flow_table_destroy;
+ 
++	ppe->fdb_wq = alloc_workqueue("airoha_ppe_fdb", WQ_UNBOUND, 0);
++	if (!ppe->fdb_wq) {
++		err = -ENOMEM;
++		goto error_debugfs_remove;
++	}
++
++	ppe->fdb_nb.notifier_call = airoha_ppe_fdb_event;
++	err = register_switchdev_notifier(&ppe->fdb_nb);
++	if (err)
++		goto error_destroy_wq;
++
+ 	return 0;
+ 
++error_destroy_wq:
++	destroy_workqueue(ppe->fdb_wq);
++error_debugfs_remove:
++	debugfs_remove(ppe->debugfs_dir);
+ error_l2_flow_table_destroy:
+ 	rhashtable_destroy(&ppe->l2_flows);
+ error_flow_table_destroy:
+@@ -1715,6 +1811,10 @@
+ 
+ 	mutex_unlock(&flow_offload_mutex);
+ 
++	unregister_switchdev_notifier(&eth->ppe->fdb_nb);
++	flush_workqueue(eth->ppe->fdb_wq);
++	destroy_workqueue(eth->ppe->fdb_wq);
++
+ 	rhashtable_destroy(&eth->ppe->l2_flows);
+ 	rhashtable_destroy(&eth->flow_table);
+ 	debugfs_remove(eth->ppe->debugfs_dir);

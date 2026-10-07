@@ -17,10 +17,10 @@ Depends on 039-wifi-mt76-mt7996-poll-adm-stat-under-npu-offload.patch
 Signed-off-by: Gilly <gilroyscott1970@gmail.com>
 ---
 diff --git a/mt7996/main.c b/mt7996/main.c
-index 9f6afaf3..df1ceb07 100644
+index 38b3cd30..3ed21419 100644
 --- a/mt7996/main.c
 +++ b/mt7996/main.c
-@@ -1994,18 +1994,38 @@ static void mt7996_sta_statistics(struct ieee80211_hw *hw,
+@@ -2499,18 +2499,38 @@ static void mt7996_sta_statistics(struct ieee80211_hw *hw,
  		-(s8)ewma_avg_signal_read(&msta_link->avg_ack_signal);
  	sinfo->filled |= BIT_ULL(NL80211_STA_INFO_ACK_SIGNAL_AVG);
  
@@ -66,5 +66,5 @@ index 9f6afaf3..df1ceb07 100644
 +			sinfo->filled |= BIT_ULL(NL80211_STA_INFO_RX_PACKETS);
 +		}
  	}
- }
  
+ out:

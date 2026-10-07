@@ -21,12 +21,11 @@ Signed-off-by: Gilly <gilroyscott1970@gmail.com>
 ---
  mt7996/debugfs.c | 79 ++++++++++++++++++++++++++++++++++++++++++++++++
  1 file changed, 79 insertions(+)
-
 diff --git a/mt7996/debugfs.c b/mt7996/debugfs.c
-index cd5d07e..5629800 100644
+index 3780760a..e973bee1 100644
 --- a/mt7996/debugfs.c
 +++ b/mt7996/debugfs.c
-@@ -604,6 +604,43 @@ mt7996_tx_stats_show(struct seq_file *file, void *data)
+@@ -597,6 +597,44 @@ mt7996_tx_stats_show(struct seq_file *file, void *data)
  
  DEFINE_SHOW_ATTRIBUTE(mt7996_tx_stats);
  
@@ -67,10 +66,11 @@ index cd5d07e..5629800 100644
 +}
 +DEFINE_SHOW_ATTRIBUTE(mt7996_band_bytes);
 +
- static void
- mt7996_hw_queue_read(struct seq_file *s, u32 size,
- 		     const struct hw_queue_map *map)
-@@ -916,6 +953,8 @@ int mt7996_init_debugfs(struct mt7996_dev *dev)
++
+ enum {
+ 	MT_QUEUE_PORT_HIF,
+ 	MT_QUEUE_PORT_CPU,
+@@ -1001,6 +1039,8 @@ int mt7996_init_debugfs(struct mt7996_dev *dev)
  	debugfs_create_file("xmit-queues", 0400, dir, dev,
  			    &mt7996_xmit_queues_fops);
  	debugfs_create_file("tx_stats", 0400, dir, dev, &mt7996_tx_stats_fops);
@@ -79,7 +79,7 @@ index cd5d07e..5629800 100644
  	debugfs_create_file("sys_recovery", 0600, dir, dev,
  			    &mt7996_sys_recovery_ops);
  	debugfs_create_file("fw_debug_wm", 0600, dir, dev, &fops_fw_debug_wm);
-@@ -1104,11 +1143,51 @@ static const struct file_operations fops_fixed_rate = {
+@@ -1189,11 +1229,51 @@ static const struct file_operations fops_fixed_rate = {
  	.llseek = default_llseek,
  };
  
@@ -131,6 +131,3 @@ index cd5d07e..5629800 100644
  }
  
  #endif
--- 
-2.43.0
-

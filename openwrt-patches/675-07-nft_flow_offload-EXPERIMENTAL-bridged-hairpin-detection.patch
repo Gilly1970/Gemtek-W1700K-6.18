@@ -1,0 +1,211 @@
+From: Gilly1970 <gilroyscott1970@gmail.com>
+Date: Thu, 24 Sep 2026 00:00:00 +0000
+Subject: [PATCH] netfilter: nft_flow_offload: EXPERIMENTAL bridged hairpin detection
+
+EXPERIMENTAL - posted for testing, not validated on a hairpin topology.
+
+Airoha PPE entries for IP flows are matched on the 5-tuple only (no
+ingress port, VLAN or MAC). When an L3 device on the bridge routes
+between two hosts that are also behind the bridge (inter-VLAN router R:
+A -> R on VLAN 1, R -> B on VLAN 3), every packet crosses the bridge
+twice with the same 5-tuple and conntrack treats both passes as one ct.
+The offloaded flow is then applied to both passes: packets loop back to
+R until TTL expiry (~1/60 throughput), or R is skipped entirely.
+
+The software flowtable does key on ingress device and VLAN, so the other
+pass misses the fast path and reaches the flow_offload expression while
+the ct is already offloaded, on a different bridge port/VLAN than the one
+recorded at offload time. Use that as the signal:
+
+ - record the physical ingress port + VLAN of each direction when a
+   bridged flow is offloaded (small lossy side table keyed on the ct);
+ - on a same-direction mismatch, set a kernel-private ct->status bit so
+   the flowtable GC tears the flow (and its PPE entry) down;
+ - first mismatch still allows re-offload (a Wi-Fi roam changes the port
+   once); a second one within 10 s blocks offload for the ct's lifetime.
+
+Detections are logged (ratelimited) as "nft_flow_offload: bridged
+hairpin?". Covers the nftables flowtable path only: bridger TC-flower
+subflows are keyed on the 5-tuple too and are NOT handled here. Does not
+change the TTL decrement on offloaded bridged flows.
+
+Applies after 675-05/675-06.
+
+diff -ru a/include/net/netfilter/nf_flow_table.h b/include/net/netfilter/nf_flow_table.h
+--- a/include/net/netfilter/nf_flow_table.h	2026-09-24 09:51:53.851435883 +1000
++++ b/include/net/netfilter/nf_flow_table.h	2026-09-24 10:05:00.555316814 +1000
+@@ -161,6 +161,9 @@
+ 	struct flow_offload_tuple	tuple;
+ };
+ 
++#define NF_FLOW_CT_HAIRPIN_TEARDOWN_BIT	(__IPS_MAX_BIT)
++#define NF_FLOW_CT_HAIRPIN_BLOCK_BIT	(__IPS_MAX_BIT + 1)
++
+ enum nf_flow_flags {
+ 	NF_FLOW_SNAT,
+ 	NF_FLOW_DNAT,
+diff -ru a/net/netfilter/nf_flow_table_core.c b/net/netfilter/nf_flow_table_core.c
+--- a/net/netfilter/nf_flow_table_core.c	2026-09-24 09:51:53.846435559 +1000
++++ b/net/netfilter/nf_flow_table_core.c	2026-09-24 09:51:53.874437369 +1000
+@@ -565,6 +565,7 @@
+ 
+ 	if (nf_flow_has_expired(flow) ||
+ 	    nf_ct_is_dying(flow->ct) ||
++	    test_bit(NF_FLOW_CT_HAIRPIN_TEARDOWN_BIT, &flow->ct->status) ||
+ 	    nf_flow_custom_gc(flow_table, flow)) {
+ 		flow_offload_teardown(flow);
+ 		teardown = true;
+diff -ru a/net/netfilter/nft_flow_offload.c b/net/netfilter/nft_flow_offload.c
+--- a/net/netfilter/nft_flow_offload.c	2026-09-24 09:51:53.842435301 +1000
++++ b/net/netfilter/nft_flow_offload.c	2026-09-24 10:05:00.555316814 +1000
+@@ -6,6 +6,9 @@
+ #include <linux/netfilter.h>
+ #include <linux/workqueue.h>
+ #include <linux/spinlock.h>
++#include <linux/hash.h>
++#include <linux/jiffies.h>
++#include <linux/netfilter_bridge.h>
+ #include <linux/netfilter/nf_conntrack_common.h>
+ #include <linux/netfilter/nf_tables.h>
+ #include <net/ip.h>
+@@ -46,6 +49,101 @@
+ 	spin_unlock_bh(&ct->lock);
+ }
+ 
++#define NFT_FLOW_HAIRPIN_BITS		10
++#define NFT_FLOW_HAIRPIN_WINDOW		(10 * HZ)
++
++struct nft_flow_hairpin_slot {
++	const struct nf_conn	*ct;
++	u32			ct_id;
++	int			iif[IP_CT_DIR_MAX];
++	u16			vid[IP_CT_DIR_MAX];
++	u8			strikes;
++	unsigned long		stamp;
++};
++
++static struct nft_flow_hairpin_slot
++	nft_flow_hairpin_tbl[1 << NFT_FLOW_HAIRPIN_BITS];
++static DEFINE_SPINLOCK(nft_flow_hairpin_lock);
++
++static u16 nft_flow_hairpin_vid(const struct sk_buff *skb)
++{
++	return skb_vlan_tag_present(skb) ? skb_vlan_tag_get_id(skb) : 0;
++}
++
++static struct nft_flow_hairpin_slot *
++nft_flow_hairpin_slot(const struct nf_conn *ct)
++{
++	return &nft_flow_hairpin_tbl[hash_ptr(ct, NFT_FLOW_HAIRPIN_BITS)];
++}
++
++static void nft_flow_hairpin_record(const struct nf_conn *ct,
++				    enum ip_conntrack_dir dir,
++				    const struct sk_buff *skb)
++{
++	struct nft_flow_hairpin_slot *s = nft_flow_hairpin_slot(ct);
++	u16 vid = nft_flow_hairpin_vid(skb);
++	u32 ct_id = nf_ct_get_id(ct);
++
++	spin_lock_bh(&nft_flow_hairpin_lock);
++	if (s->ct != ct || s->ct_id != ct_id) {
++		memset(s, 0, sizeof(*s));
++		s->ct = ct;
++		s->ct_id = ct_id;
++	}
++	s->iif[dir] = nf_bridge_get_physinif(skb);
++	s->iif[!dir] = nf_bridge_get_physoutif(skb);
++	s->vid[dir] = vid;
++	s->vid[!dir] = vid;
++	spin_unlock_bh(&nft_flow_hairpin_lock);
++}
++
++static bool nft_flow_hairpin_check(struct nf_conn *ct,
++				   enum ip_conntrack_dir dir,
++				   const struct sk_buff *skb)
++{
++	struct nft_flow_hairpin_slot *s;
++	int iif, rec_iif = 0;
++	u16 vid, rec_vid = 0;
++	u8 strikes = 0;
++
++	if (test_bit(NF_FLOW_CT_HAIRPIN_BLOCK_BIT, &ct->status))
++		return true;
++
++	iif = nf_bridge_get_physinif(skb);
++	if (!iif || !test_bit(IPS_OFFLOAD_BIT, &ct->status))
++		return false;
++
++	vid = nft_flow_hairpin_vid(skb);
++	s = nft_flow_hairpin_slot(ct);
++
++	spin_lock_bh(&nft_flow_hairpin_lock);
++	if (s->ct == ct && s->ct_id == nf_ct_get_id(ct) && s->iif[dir] &&
++	    (s->iif[dir] != iif || s->vid[dir] != vid)) {
++		rec_iif = s->iif[dir];
++		rec_vid = s->vid[dir];
++		s->iif[IP_CT_DIR_ORIGINAL] = 0;
++		s->iif[IP_CT_DIR_REPLY] = 0;
++		if (time_after(jiffies, s->stamp + NFT_FLOW_HAIRPIN_WINDOW))
++			s->strikes = 0;
++		strikes = ++s->strikes;
++		s->stamp = jiffies;
++	}
++	spin_unlock_bh(&nft_flow_hairpin_lock);
++
++	if (!strikes)
++		return false;
++
++	if (strikes >= 2)
++		set_bit(NF_FLOW_CT_HAIRPIN_BLOCK_BIT, &ct->status);
++	set_bit(NF_FLOW_CT_HAIRPIN_TEARDOWN_BIT, &ct->status);
++
++	pr_info_ratelimited("nft_flow_offload: bridged hairpin? ct %08x dir %d in ifindex %d vid %u, flow offloaded via ifindex %d vid %u (strike %u%s)\n",
++			    nf_ct_get_id(ct), dir, iif, vid, rec_iif, rec_vid,
++			    strikes, strikes >= 2 ? ", offload blocked" : "");
++
++	return strikes >= 2;
++}
++
+ static void nft_flow_offload_eval(const struct nft_expr *expr,
+ 				  struct nft_regs *regs,
+ 				  const struct nft_pktinfo *pkt)
+@@ -58,6 +156,7 @@
+ 	struct flow_offload *flow;
+ 	enum ip_conntrack_dir dir;
+ 	struct nf_conn *ct;
++	bool bridging;
+ 	int ret;
+ 
+ 	if (nft_flow_offload_skip(pkt->skb, nft_pf(pkt)))
+@@ -101,11 +200,18 @@
+ 	if (!nf_ct_is_confirmed(ct))
+ 		goto out;
+ 
++	dir = CTINFO2DIR(ctinfo);
++	if (nf_bridge_info_exists(pkt->skb) &&
++	    nft_flow_hairpin_check(ct, dir, pkt->skb))
++		goto out;
++
+ 	if (test_and_set_bit(IPS_OFFLOAD_BIT, &ct->status))
+ 		goto out;
+ 
+-	dir = CTINFO2DIR(ctinfo);
+-	if (nft_flow_offload_is_bridging(pkt->skb)) {
++	clear_bit(NF_FLOW_CT_HAIRPIN_TEARDOWN_BIT, &ct->status);
++
++	bridging = nft_flow_offload_is_bridging(pkt->skb);
++	if (bridging) {
+ 		if (nft_flow_route_bridging(pkt, ct, &route, dir, priv->flowtable) < 0)
+ 			goto err_flow_route;
+ 	} else {
+@@ -126,6 +232,9 @@
+ 	if (ret < 0)
+ 		goto err_flow_add;
+ 
++	if (bridging && nf_bridge_info_exists(pkt->skb))
++		nft_flow_hairpin_record(ct, dir, pkt->skb);
++
+ 	return;
+ 
+ err_flow_add:

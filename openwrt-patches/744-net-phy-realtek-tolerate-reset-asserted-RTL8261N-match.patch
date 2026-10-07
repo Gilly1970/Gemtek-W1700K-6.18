@@ -1,0 +1,36 @@
+From: Gilly1970 <gilroyscott1970@gmail.com>
+Subject: [PATCH] net: phy: realtek: tolerate reset-asserted RTL8261N on match
+
+rtl826x_probe() loads rtl8261n.bin with request_firmware_direct() and
+returns -EPROBE_DEFER while the root filesystem is not mounted yet.
+phy_probe() then re-asserts the PHY reset-gpios, so when the deferred
+probe is retried rtl8261n_match_phy_device() reads VEND1 PKG_MODEL from
+a PHY that is held in reset.
+
+Since "generic: harden RTL826x PHY match, EEE and soft-reset" the match
+requires PKG_MODEL == 0x8261. The value read from the reset PHY fails
+that test, no driver matches on the retry and phylink attaches the
+Generic Clause 45 PHY driver instead. The USXGMII link never comes up.
+
+Seen on the Gemtek W1700K (RTL8261N on lan2 and wan, both with
+reset-gpios and 200 ms reset-assert/deassert-us, driver built in).
+
+Go back to rejecting only the known other package models for the
+RTL8261N entry. The PHY ID (0x001ccaf3) together with the VERSION_ID
+"BE" check already separates it from the RTL8261BE, which keeps the
+strict PKG_MODEL test.
+
+Signed-off-by: Gilly1970 <gilroyscott1970@gmail.com>
+---
+--- a/drivers/net/phy/realtek/realtek_main.c
++++ b/drivers/net/phy/realtek/realtek_main.c
+@@ -3007,7 +3007,8 @@
+ 	if (data < 0)
+ 		return 0;
+ 
+-	if (data != RTL826X_VEND1_PKG_MODEL_8261)
++	if (data == RTL826X_VEND1_PKG_MODEL_8251 ||
++	    data == RTL826X_VEND1_PKG_MODEL_8254)
+ 		return 0;
+ 
+ 	data = phy_read_mmd(phydev, MDIO_MMD_VEND1, RTL826X_VEND1_VERSION_ID);

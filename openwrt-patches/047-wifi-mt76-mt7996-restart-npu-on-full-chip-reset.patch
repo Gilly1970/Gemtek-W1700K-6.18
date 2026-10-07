@@ -21,10 +21,10 @@ NPU handling; not yet exercised on-device, as full chip resets are rare.
 Signed-off-by: Gilly <gilroyscott1970@gmail.com>
 ---
 diff --git a/mt7996/mac.c b/mt7996/mac.c
-index 976a0932..4e78c9af 100644
+index d687a76b..0cadeb2f 100644
 --- a/mt7996/mac.c
 +++ b/mt7996/mac.c
-@@ -2325,6 +2325,13 @@ mt7996_mac_restart(struct mt7996_dev *dev)
+@@ -2328,6 +2328,13 @@ mt7996_mac_restart(struct mt7996_dev *dev)
  		    mt76_queue_is_wed_rro(&mdev->q_rx[i]))
  			continue;
  
@@ -38,7 +38,7 @@ index 976a0932..4e78c9af 100644
  		if (mdev->q_rx[i].ndesc)
  			napi_disable(&dev->mt76.napi[i]);
  	}
-@@ -2341,6 +2348,13 @@ mt7996_mac_restart(struct mt7996_dev *dev)
+@@ -2344,6 +2351,13 @@ mt7996_mac_restart(struct mt7996_dev *dev)
  		    mt76_queue_is_wed_rro(&mdev->q_rx[i]))
  			continue;
  
@@ -52,7 +52,7 @@ index 976a0932..4e78c9af 100644
  		if (mdev->q_rx[i].ndesc) {
  			napi_enable(&dev->mt76.napi[i]);
  			local_bh_disable();
-@@ -2394,6 +2408,17 @@ mt7996_mac_restart(struct mt7996_dev *dev)
+@@ -2397,6 +2411,17 @@ mt7996_mac_restart(struct mt7996_dev *dev)
  				     MT_INT_TX_RX_DONE_EXT);
  	}
  
@@ -70,7 +70,7 @@ index 976a0932..4e78c9af 100644
  	/* set the necessary init items */
  	ret = mt7996_mcu_set_eeprom(dev);
  	if (ret)
-@@ -2472,6 +2497,11 @@ mt7996_mac_full_reset(struct mt7996_dev *dev)
+@@ -2475,6 +2500,11 @@ mt7996_mac_full_reset(struct mt7996_dev *dev)
  
  	dev->recovery.hw_full_reset = true;
  
@@ -79,6 +79,6 @@ index 976a0932..4e78c9af 100644
 +	 */
 +	mt7996_npu_hw_stop(dev);
 +
+ 	set_bit(MT76_RESTART, &dev->mphy.state);
  	set_bit(MT76_MCU_RESET, &dev->mphy.state);
  	wake_up(&dev->mt76.mcu.wait);
- 	ieee80211_stop_queues(hw);

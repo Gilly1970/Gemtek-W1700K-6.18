@@ -30,7 +30,7 @@ readonly OPENWRT_REPO="https://github.com/openwrt/openwrt.git"
 #readonly OPENWRT_REPO="/home/user/openwrt/repos/openwrt"
 
 OPENWRT_BRANCH="master"
-readonly OPENWRT_COMMIT="47b46ced13d24735182e48e63fbbeaa5bc5f41a4"
+readonly OPENWRT_COMMIT="79bc56cb7483bc716da07c369530b792631904b4"
 
 # --- Upstream PR: Cherry-pick on top ---
 # Remove the entry once the PR lands in master.
