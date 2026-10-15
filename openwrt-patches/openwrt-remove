@@ -1,6 +1,2 @@
 # Patches removed from the upstream airoha-6.18-work tree before our patches are applied
 
-# Stock OpenWrt mt76 patches that are already merged into the 2026-06-02 mt76 source bump.
-# Leaving these in causes "patch already applied" / hunk failures during the mt76 build.
-package/kernel/mt76/patches/002-use-hrtimer_setup-in-mt76x02u-beacon-init.patch
-package/kernel/mt76/patches/003-pass-LED-define-via-ccflags-y.patch
