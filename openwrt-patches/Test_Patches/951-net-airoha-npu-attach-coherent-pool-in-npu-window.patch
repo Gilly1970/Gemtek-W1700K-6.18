@@ -1,0 +1,39 @@
+From: Gilly1970 <gilroyscott1970@gmail.com>
+Date: Mon, 19 Oct 2026 21:00:00 +1000
+Subject: [TEST PATCH] net: airoha: npu: attach a coherent pool in the NPU window
+
+---
+--- a/drivers/net/ethernet/airoha/airoha_npu.c
++++ b/drivers/net/ethernet/airoha/airoha_npu.c
+@@ -717,6 +717,11 @@
+ 	.disable_locking	= true,
+ };
+ 
++static void airoha_npu_rmem_release(void *data)
++{
++	of_reserved_mem_device_release(data);
++}
++
+ static int airoha_npu_probe(struct platform_device *pdev)
+ {
+ 	struct device *dev = &pdev->dev;
+@@ -800,6 +805,19 @@
+ 	if (err)
+ 		return err;
+ 
++	if (of_property_match_string(dev->of_node, "memory-region-names",
++				     "dma") >= 0) {
++		err = of_reserved_mem_device_init_by_name(dev, dev->of_node,
++							  "dma");
++		if (err)
++			return err;
++
++		err = devm_add_action_or_reset(dev, airoha_npu_rmem_release,
++					       dev);
++		if (err)
++			return err;
++	}
++
+ 	for (i = 0; i < ARRAY_SIZE(npu->cores); i++) {
+ 		struct airoha_npu_core *core = &npu->cores[i];
+ 
