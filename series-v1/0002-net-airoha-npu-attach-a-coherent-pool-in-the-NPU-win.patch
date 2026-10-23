@@ -28,7 +28,8 @@ A device coherent pool has no fallback once full; mt76 and the mailbox
 use ~10.7 MiB with MT7996, so the DT region should be 16 MiB.
 
 Link: https://lore.kernel.org/r/atCRsquzA1UxSpCc@mediatek.com
-Assisted-by: Claude:claude-opus-5-5
+Assisted-by: Claude:claude-fable-5-1
+Signed-off-by: Chris Scott <gilroyscott1970@gmail.com>
 ---
  drivers/net/ethernet/airoha/airoha_npu.c | 18 ++++++++++++++++++
  1 file changed, 18 insertions(+)
