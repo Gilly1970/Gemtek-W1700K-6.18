@@ -1,0 +1,76 @@
+From 38bb05e9bc284e939b769aef75ed8efcbb857e05 Mon Sep 17 00:00:00 2001
+From: Daniel Pawlik <pawlik.dan@gmail.com>
+Date: Fri, 23 Oct 2026 11:23:21 +1000
+Subject: [PATCH net-next 1/3] dt-bindings: net: airoha: npu: add DMA pool
+ memory region
+
+The EN7581 NPU can only address host DRAM at 0x80000000-0xbfffffff;
+higher addresses alias the lower 1 GiB. Allow an optional shared DMA
+pool, after the firmware region or after the WLAN regions, so coherent
+buffers shared with the NPU can be kept inside that window. The
+firmware region stays first for existing users.
+
+Link: https://lore.kernel.org/r/atCRsquzA1UxSpCc@mediatek.com
+Assisted-by: Codex Astra
+---
+ .../bindings/net/airoha,en7581-npu.yaml       | 40 ++++++++++++-------
+ 1 file changed, 26 insertions(+), 14 deletions(-)
+
+diff --git a/Documentation/devicetree/bindings/net/airoha,en7581-npu.yaml b/Documentation/devicetree/bindings/net/airoha,en7581-npu.yaml
+index aefa19c5b..21a1a2750 100644
+--- a/Documentation/devicetree/bindings/net/airoha,en7581-npu.yaml
++++ b/Documentation/devicetree/bindings/net/airoha,en7581-npu.yaml
+@@ -42,22 +42,34 @@ properties:
+       - description: wlan irq line5
+ 
+   memory-region:
+-    items:
+-      - description: NPU firmware binary region
+-      - description: NPU wlan offload RX buffers region
+-      - description: NPU wlan offload TX buffers region
+-      - description: NPU wlan offload TX packet identifiers region
+-      - description: NPU wlan Block Ack buffers region
+-    minItems: 1
++    oneOf:
++      - items:
++          - description: NPU firmware binary region
++          - description: Coherent DMA pool for buffers shared with the NPU
++        minItems: 1
++      - items:
++          - description: NPU firmware binary region
++          - description: NPU wlan offload RX buffers region
++          - description: NPU wlan offload TX buffers region
++          - description: NPU wlan offload TX packet identifiers region
++          - description: NPU wlan Block Ack buffers region
++          - description: Coherent DMA pool for buffers shared with the NPU
++        minItems: 4
+ 
+   memory-region-names:
+-    items:
+-      - const: firmware
+-      - const: pkt
+-      - const: tx-pkt
+-      - const: tx-bufid
+-      - const: ba
+-    minItems: 1
++    oneOf:
++      - items:
++          - const: firmware
++          - const: dma
++        minItems: 1
++      - items:
++          - const: firmware
++          - const: pkt
++          - const: tx-pkt
++          - const: tx-bufid
++          - const: ba
++          - const: dma
++        minItems: 4
+ 
+   firmware-name:
+     items:
+
+base-commit: 1a2c35c49cc7c6be860038b8442b52424a8f123c
+-- 
+2.53.0
+

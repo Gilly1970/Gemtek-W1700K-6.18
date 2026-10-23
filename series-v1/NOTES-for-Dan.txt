@@ -1,0 +1,55 @@
+NPU DMA pool series - prepared against net-next (base 1a2c35c49, 2026-10-22)
+==========================================================================
+
+Apply:  git checkout -b npu-dma-pool 1a2c35c49 && git am 000[1-3]-*.patch
+
+No Signed-off-by lines are included on purpose - each person adds their own:
+  1. Chris (Gilly) signs patch 2 before handing the series over.
+  2. Dan, after git am:
+       git rebase --exec 'git commit --amend --no-edit -s' 1a2c35c49
+     This adds Dan's SoB to all three - on patch 2 it lands after Chris's,
+     which is the normal chain for a patch carried by another submitter.
+
+Changes made to Dan's patches while rebasing - please review
+-------------------------------------------------------------
+1/3 dt-bindings: mainline already has "firmware" (not "binary"), the Block
+    Ack region and firmware-name, so the patch now only adds "dma". Same
+    oneOf structure as the OpenWrt version. Commit message rewritten.
+    Note: the WLAN branch keeps minItems: 4, so a 2- or 3-entry list
+    (firmware, pkt[, tx-pkt]) that today's binding accepts would now be
+    rejected. No in-tree DTS uses that (mainline en7581.dtsi has no NPU
+    node), but reviewers may ask. A WLAN board must also list "ba" to add
+    "dma" (by design). The example still shows the 5-region list.
+    Checked: dt_binding_check clean; validated firmware / firmware+dma /
+    5 WLAN / 5 WLAN+dma / 4 WLAN = valid, firmware+pkt / dma-without-ba /
+    dma-first = rejected.
+
+3/3 mailbox: code is v6 as posted, rebased. Two changes: the per-core
+    dmam_alloc_coherent() loop now sits after the pool is attached (patch
+    2) and before airoha_npu_run_firmware(); the in-code comment no longer
+    says "0.0 despite MBOX success" but gives the window/swiotlb reason.
+    Commit message rewritten around the address window (answers Kuba's
+    v6 "masks the underlying problem" question). No Fixes: tag - add
+    6f884eb87a79 and target net instead if you prefer.
+
+Checks run on each commit
+-------------------------
+- checkpatch.pl --strict: 0 errors / 0 warnings / 0 checks
+- arm64 W=1 build of drivers/net/ethernet/airoha + mt76 (MT7996_NPU=y):
+  clean at every commit (bisectable)
+- NOT boot-tested as this exact net-next series; hardware results in the
+  cover letter are from the OpenWrt 6.18.55 / 7.3-rc6 equivalents.
+
+To / Cc (scripts/get_maintainer.pl)
+-----------------------------------
+To:  netdev@vger.kernel.org
+Cc:  Lorenzo Bianconi <lorenzo@kernel.org>, Andrew Lunn <andrew+netdev@lunn.ch>,
+     "David S. Miller" <davem@davemloft.net>, Eric Dumazet <edumazet@kernel.org>,
+     Jakub Kicinski <kuba@kernel.org>, Paolo Abeni <pabeni@redhat.com>,
+     Rob Herring <robh@kernel.org>, Krzysztof Kozlowski <krzk+dt@kernel.org>,
+     Conor Dooley <conor+dt@kernel.org>, Matthias Brugger <matthias.bgg@gmail.com>,
+     AngeloGioacchino Del Regno <angelogioacchino.delregno@collabora.com>,
+     devicetree@vger.kernel.org, linux-arm-kernel@lists.infradead.org,
+     linux-mediatek@lists.infradead.org, linux-kernel@vger.kernel.org
+Suggested extra Cc: Zhengping Zhang <zhengping.zhang@airoha.com> (window
+     confirmation), Chris Scott <gilroyscott1970@gmail.com>

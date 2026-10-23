@@ -1,0 +1,164 @@
+From 4ed22c7a825cdd2ddc7ce9dd6f3cc0a421c1f06d Mon Sep 17 00:00:00 2001
+From: Daniel Pawlik <pawlik.dan@gmail.com>
+Date: Fri, 23 Oct 2026 11:25:11 +1000
+Subject: [PATCH net-next 3/3] net: airoha: npu: use coherent memory for
+ mailbox messages
+
+airoha_npu_send_msg() maps the caller's kzalloc() buffer with
+DMA_BIDIRECTIONAL. These buffers are small and not cacheline aligned,
+so on arm64 the mapping bounces through swiotlb. On a 2 GiB EN7581
+board the default swiotlb pool sits above 0xc0000000 (0xff6cf000 on
+W1700K), outside the 0x80000000-0xbfffffff window the NPU can address;
+higher addresses alias the lower 1 GiB. On W1700K + MT7996 this makes
+WLAN_FUNC_GET_WAIT_NPU_VERSION read back 0.0 and mt76 does not bind
+NPU offload.
+
+Allocate one coherent buffer per NPU core at probe and reuse it under
+the per-core mailbox lock. With the previous patch it comes from the
+NPU DMA pool, inside the window. airoha_npu_send_msg() is also called
+from PPE foe_commit under spin_lock_bh(), which rules out a per-message
+GFP_ATOMIC coherent allocation.
+
+Add __airoha_npu_send_msg() with an optional reply buffer so GET
+callers copy only the trailing response payload; airoha_npu_send_msg()
+keeps copying the whole buffer back, like the bidirectional mapping.
+
+Link: https://lore.kernel.org/r/20260809152813.585797-1-pawlik.dan@gmail.com
+Link: https://lore.kernel.org/r/atCRsquzA1UxSpCc@mediatek.com
+Assisted-by: Cursor:composer-2
+---
+ drivers/net/ethernet/airoha/airoha_npu.c  | 65 +++++++++++++++++------
+ include/linux/soc/airoha/airoha_offload.h |  3 ++
+ 2 files changed, 51 insertions(+), 17 deletions(-)
+
+diff --git a/drivers/net/ethernet/airoha/airoha_npu.c b/drivers/net/ethernet/airoha/airoha_npu.c
+index 069fd6068..3d1aa63dd 100644
+--- a/drivers/net/ethernet/airoha/airoha_npu.c
++++ b/drivers/net/ethernet/airoha/airoha_npu.c
+@@ -24,6 +24,12 @@
+ #define NPU_EN7581_FIRMWARE_RV32_MAX_SIZE	0x200000
+ #define NPU_EN7581_FIRMWARE_DATA_MAX_SIZE	0x10000
+ #define NPU_DUMP_SIZE				512
++/*
++ * Mailbox DMA payload size. Covers sizeof(struct ppe_mbox_data) (28) and
++ * WLAN TLV messages (header + payload); largest in-tree WLAN payload today
++ * is 16 bytes (INODE_TXRX_REG_ADDR). Keep headroom for future commands.
++ */
++#define AIROHA_NPU_MBOX_SIZE			256
+ 
+ #define REG_NPU_LOCAL_SRAM		0x0
+ 
+@@ -161,23 +167,32 @@ struct wlan_mbox_data {
+ 	DECLARE_FLEX_ARRAY(u8, d);
+ };
+ 
+-static int airoha_npu_send_msg(struct airoha_npu *npu, int func_id,
+-			       void *p, int size)
++static int __airoha_npu_send_msg(struct airoha_npu *npu, int func_id,
++				 const void *data, int len, void *reply,
++				 u16 reply_len)
+ {
+-	u16 core = 0; /* FIXME */
+-	u32 val, offset = core << 4;
+-	dma_addr_t dma_addr;
++	struct airoha_npu_core *core = &npu->cores[0]; /* FIXME: core */
++	u32 val, offset = 0;
+ 	int ret;
+ 
+-	dma_addr = dma_map_single(npu->dev, p, size, DMA_BIDIRECTIONAL);
+-	ret = dma_mapping_error(npu->dev, dma_addr);
+-	if (ret)
+-		return ret;
++	if (len > AIROHA_NPU_MBOX_SIZE)
++		return -EINVAL;
++
++	if (reply && reply_len > len)
++		return -EINVAL;
++
++	/*
++	 * The NPU only reaches DRAM at 0x80000000-0xbfffffff; a streaming
++	 * mapping of the caller buffer may bounce through swiotlb outside
++	 * that window. Use the probe-time coherent buffer, which comes from
++	 * the NPU DMA pool when one is declared.
++	 */
++	spin_lock_bh(&core->lock);
+ 
+-	spin_lock_bh(&npu->cores[core].lock);
++	memcpy(core->buf, data, len);
+ 
+-	regmap_write(npu->regmap, REG_CR_MBQ0_CTRL(0) + offset, dma_addr);
+-	regmap_write(npu->regmap, REG_CR_MBQ0_CTRL(1) + offset, size);
++	regmap_write(npu->regmap, REG_CR_MBQ0_CTRL(0) + offset, core->addr);
++	regmap_write(npu->regmap, REG_CR_MBQ0_CTRL(1) + offset, len);
+ 	regmap_read(npu->regmap, REG_CR_MBQ0_CTRL(2) + offset, &val);
+ 	regmap_write(npu->regmap, REG_CR_MBQ0_CTRL(2) + offset, val + 1);
+ 	val = FIELD_PREP(MBOX_MSG_FUNC_ID, func_id) | MBOX_MSG_WAIT_RSP;
+@@ -190,13 +205,21 @@ static int airoha_npu_send_msg(struct airoha_npu *npu, int func_id,
+ 	if (!ret && FIELD_GET(MBOX_MSG_STATUS, val) != NPU_MBOX_SUCCESS)
+ 		ret = -EINVAL;
+ 
+-	spin_unlock_bh(&npu->cores[core].lock);
++	/* Copy the trailing reply_len bytes of the response. */
++	if (!ret && reply)
++		memcpy(reply, core->buf + len - reply_len, reply_len);
+ 
+-	dma_unmap_single(npu->dev, dma_addr, size, DMA_BIDIRECTIONAL);
++	spin_unlock_bh(&core->lock);
+ 
+ 	return ret;
+ }
+ 
++static int airoha_npu_send_msg(struct airoha_npu *npu, int func_id,
++			       void *data, int len)
++{
++	return __airoha_npu_send_msg(npu, func_id, data, len, data, len);
++}
++
+ static int airoha_npu_load_firmware(struct device *dev, void __iomem *addr,
+ 				    const char *fw_name, int fw_max_size)
+ {
+@@ -500,9 +523,8 @@ static int airoha_npu_wlan_msg_get(struct airoha_npu *npu, int ifindex,
+ 	wlan_data->func_type = NPU_OP_GET;
+ 	wlan_data->func_id = func_id;
+ 
+-	err = airoha_npu_send_msg(npu, NPU_FUNC_WIFI, wlan_data, len);
+-	if (!err)
+-		memcpy(data, wlan_data->d, data_len);
++	err = __airoha_npu_send_msg(npu, NPU_FUNC_WIFI, wlan_data, len,
++				    data, data_len);
+ 	kfree(wlan_data);
+ 
+ 	return err;
+@@ -794,6 +816,15 @@ static int airoha_npu_probe(struct platform_device *pdev)
+ 			return err;
+ 	}
+ 
++	for (i = 0; i < ARRAY_SIZE(npu->cores); i++) {
++		struct airoha_npu_core *core = &npu->cores[i];
++
++		core->buf = dmam_alloc_coherent(dev, AIROHA_NPU_MBOX_SIZE,
++						&core->addr, GFP_KERNEL);
++		if (!core->buf)
++			return -ENOMEM;
++	}
++
+ 	err = airoha_npu_run_firmware(dev, base, &res);
+ 	if (err)
+ 		return err;
+diff --git a/include/linux/soc/airoha/airoha_offload.h b/include/linux/soc/airoha/airoha_offload.h
+index 7589fccfe..16a988ad7 100644
+--- a/include/linux/soc/airoha/airoha_offload.h
++++ b/include/linux/soc/airoha/airoha_offload.h
+@@ -173,6 +173,9 @@ struct airoha_npu {
+ 		/* protect concurrent npu memory accesses */
+ 		spinlock_t lock;
+ 		struct work_struct wdt_work;
++		/* Coherent bounce buffer for mailbox cmd/rsp */
++		void *buf;
++		dma_addr_t addr;
+ 	} cores[NPU_NUM_CORES];
+ 
+ 	int irqs[NPU_NUM_IRQ];
+-- 
+2.53.0
+
