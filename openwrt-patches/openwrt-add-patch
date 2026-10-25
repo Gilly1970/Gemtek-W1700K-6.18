@@ -25,6 +25,7 @@ package/kernel/mt76/patches/039-wifi-mt76-mt7996-poll-adm-stat-under-npu-offload
 package/kernel/mt76/patches/042-wifi-mt76-fix-queue-assignment-for-disassoc-packets.patch
 package/kernel/mt76/patches/046-wifi-mt76-mt7996-report-firmware-sta-counters-under-npu-offload.patch
 package/kernel/mt76/patches/047-wifi-mt76-mt7996-restart-npu-on-full-chip-reset.patch
+package/kernel/mt76/patches/050-wifi-mt76-mt7996-retry-npu-reinit-after-l1-ser.patch
 package/kernel/mt76/patches/102-mt7996-flush-airoha-PPE-flows-on-STA-link-change.patch
 package/network/config/wifi-scripts/files-ucode/usr/share/ucode/wifi/ap.uc
 package/network/config/wifi-scripts/files-ucode/usr/share/ucode/wifi/hostapd.uc
