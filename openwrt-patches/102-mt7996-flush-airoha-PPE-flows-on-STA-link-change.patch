@@ -1,0 +1,99 @@
+From: Daniel Pawlik <pawlik.dan@gmail.com>
+Date: Thu, 23 Jul 2026 12:00:00 +0200
+Subject: [PATCH] mt7996: flush airoha PPE flows on STA link remove
+
+Same-BSS disconnect/reconnect often does not move the bridge FDB port,
+so the airoha PPE switchdev FDB notifier never runs and stale FOEs
+remain (missing upload bind after reassoc on AN7581/W1700K).
+
+Call airoha_ppe_dev_flush_flows_by_mac() from mt7996 STA link remove
+so PPE L2/L4 entries and nf_flow HW offload bits are cleared when the
+WiFi driver tears down a STA link/WCID. Always flush the station/MLD
+address used by bridge and neighbour entries, and also flush the link
+address when it differs. Avoid duplicate flushes for non-MLO stations.
+
+Signed-off-by: Daniel Pawlik <pawlik.dan@gmail.com>
+---
+--- a/airoha_offload.h
++++ b/airoha_offload.h
+@@ -21,6 +21,8 @@
+ 		void (*check_skb)(struct airoha_ppe_dev *dev,
+ 				  struct sk_buff *skb, u16 hash,
+ 				  bool rx_wlan);
++		void (*flush_flows_by_mac)(struct airoha_ppe_dev *dev,
++					   const u8 *addr);
+ 	} ops;
+ 
+ 	void *priv;
+@@ -42,6 +44,13 @@
+ {
+ 	dev->ops.check_skb(dev, skb, hash, rx_wlan);
+ }
++
++static inline void airoha_ppe_dev_flush_flows_by_mac(struct airoha_ppe_dev *dev,
++						     const u8 *addr)
++{
++	if (dev->ops.flush_flows_by_mac)
++		dev->ops.flush_flows_by_mac(dev, addr);
++}
+ #else
+ static inline struct airoha_ppe_dev *airoha_ppe_get_dev(struct device *dev)
+ {
+@@ -61,6 +70,11 @@
+ static inline void airoha_ppe_dev_check_skb(struct airoha_ppe_dev *dev,
+ 					    struct sk_buff *skb, u16 hash,
+ 					    bool rx_wlan)
++{
++}
++
++static inline void airoha_ppe_dev_flush_flows_by_mac(struct airoha_ppe_dev *dev,
++						     const u8 *addr)
+ {
+ }
+ #endif
+--- a/mt7996/main.c
++++ b/mt7996/main.c
+@@ -1192,6 +1192,33 @@
+ 	return 0;
+ }
+ 
++static void mt7996_ppe_flush_sta_addr(struct mt7996_dev *dev, const u8 *addr)
++{
++	struct airoha_ppe_dev *ppe_dev;
++
++	if (!addr || is_zero_ether_addr(addr) || is_multicast_ether_addr(addr))
++		return;
++
++	rcu_read_lock();
++	ppe_dev = rcu_dereference(dev->mt76.mmio.ppe_dev);
++	if (ppe_dev)
++		airoha_ppe_dev_flush_flows_by_mac(ppe_dev, addr);
++	rcu_read_unlock();
++}
++
++static void mt7996_ppe_flush_sta(struct mt7996_dev *dev,
++				 struct ieee80211_sta *sta,
++				 unsigned int link_id)
++{
++	struct ieee80211_link_sta *link_sta;
++
++	/* Bridge and neighbour entries use the MLD address for MLO stations. */
++	mt7996_ppe_flush_sta_addr(dev, sta->addr);
++	link_sta = link_sta_dereference_protected(sta, link_id);
++	if (link_sta && !ether_addr_equal(link_sta->addr, sta->addr))
++		mt7996_ppe_flush_sta_addr(dev, link_sta->addr);
++}
++
+ void mt7996_mac_sta_remove_link(struct mt7996_dev *dev,
+ 				struct ieee80211_sta *sta,
+ 				unsigned int link_id, bool flush)
+@@ -1202,6 +1229,9 @@
+ 	msta_link = mt76_dereference(msta->link[link_id], &dev->mt76);
+ 	if (!msta_link)
+ 		return;
++
++	/* Same-BSS reassoc often skips FDB move; flush PPE on STA teardown. */
++	mt7996_ppe_flush_sta(dev, sta, link_id);
+ 
+ 	spin_lock_bh(&dev->mt76.sta_poll_lock);
+ 	if (!list_empty(&msta_link->wcid.poll_list))

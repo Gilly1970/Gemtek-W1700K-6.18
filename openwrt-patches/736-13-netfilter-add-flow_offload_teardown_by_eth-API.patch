@@ -1,0 +1,77 @@
+From: Daniel Pawlik <pawlik.dan@gmail.com>
+Date: Thu, 23 Jul 2026 12:00:00 +0200
+Subject: [PATCH] netfilter: add flow_offload_teardown_by_eth API
+
+Bridge flowtable offload stores L2 rewrite MACs in
+flow_offload_tuple.out.h_{source,dest} (FLOW_OFFLOAD_XMIT_DIRECT).
+When a WiFi STA reconnects on the same bridge port, FDB may not
+change, and PPE L2 FOEs cannot be mapped back to an L3/L4 tuple for
+flow_offload_teardown_by_tuple().
+
+Add flow_offload_teardown_by_eth() to walk all flowtables and tear
+down flows whose FLOW_OFFLOAD_XMIT_DIRECT headers reference the given
+MAC, clearing IPS_OFFLOAD_BIT so the next packets can re-offload.
+
+Only DIRECT is checked: NEIGH uses the same union for dst_cache, so
+reading h_source/h_dest there would be wrong.
+
+Used by airoha PPE flush on FDB change and mt76 STA remove.
+
+Signed-off-by: Daniel Pawlik <pawlik.dan@gmail.com>
+---
+--- a/include/net/netfilter/nf_flow_table.h
++++ b/include/net/netfilter/nf_flow_table.h
+@@ -299,6 +299,7 @@
+ 			      struct net_device *dev);
+ void nf_flow_table_cleanup(struct net_device *dev);
+ 
++void flow_offload_teardown_by_eth(const u8 *addr);
+ void flow_offload_teardown_by_tuple(const struct flow_offload_tuple *tuple,
+ 				    unsigned long cookie);
+ 
+--- a/net/netfilter/nf_flow_table_core.c
++++ b/net/netfilter/nf_flow_table_core.c
+@@ -517,6 +517,43 @@
+ 	mutex_unlock(&flowtable_lock);
+ }
+ EXPORT_SYMBOL_GPL(flow_offload_teardown_by_tuple);
++
++static void nf_flow_teardown_if_eth(struct nf_flowtable *flow_table,
++				    struct flow_offload *flow, void *data)
++{
++	const u8 *addr = data;
++	int dir;
++
++	for (dir = 0; dir < FLOW_OFFLOAD_DIR_MAX; dir++) {
++		struct flow_offload_tuple *t = &flow->tuplehash[dir].tuple;
++
++		/* h_* only valid for DIRECT; NEIGH stores dst_cache in union. */
++		if (t->xmit_type != FLOW_OFFLOAD_XMIT_DIRECT)
++			continue;
++
++		if (ether_addr_equal(t->out.h_source, addr) ||
++		    ether_addr_equal(t->out.h_dest, addr)) {
++			flow_offload_teardown(flow);
++			return;
++		}
++	}
++}
++
++void flow_offload_teardown_by_eth(const u8 *addr)
++{
++	struct nf_flowtable *flowtable;
++
++	if (!addr || is_zero_ether_addr(addr) ||
++	    is_multicast_ether_addr(addr))
++		return;
++
++	mutex_lock(&flowtable_lock);
++	list_for_each_entry(flowtable, &flowtables, list)
++		nf_flow_table_iterate(flowtable, nf_flow_teardown_if_eth,
++				      (void *)addr);
++	mutex_unlock(&flowtable_lock);
++}
++EXPORT_SYMBOL_GPL(flow_offload_teardown_by_eth);
+ 
+ static bool nf_flow_custom_gc(struct nf_flowtable *flow_table,
+ 			      const struct flow_offload *flow)

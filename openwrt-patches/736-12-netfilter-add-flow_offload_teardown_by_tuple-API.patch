@@ -1,0 +1,111 @@
+From: Daniel Pawlik <pawlik.dan@gmail.com>
+Subject: [PATCH] netfilter: add flow_offload_teardown_by_tuple API
+
+Hardware drivers that invalidate an offloaded rule must also tear down its
+netfilter owner so conntrack can offload it again with refreshed
+forwarding information. Add an exported helper matching either direction
+by the opaque TC offload cookie and the L3/L4 key retained by the driver.
+
+Compare cookies against live tuples instead of dereferencing them or
+matching an incomplete rhashtable key. This avoids confusing identical
+tuples in other network namespaces or conntrack zones. Validate addresses,
+ports and protocols as well, to reject cookie reuse for unrelated flows.
+
+The caller must drop its offload mutex before invoking this helper:
+netfilter cleanup holds flowtable_lock while waiting for hardware
+callbacks to finish. The normal flowtable GC handles deletion of the
+remaining hardware direction.
+
+Signed-off-by: Daniel Pawlik <pawlik.dan@gmail.com>
+---
+--- a/include/net/netfilter/nf_flow_table.h
++++ b/include/net/netfilter/nf_flow_table.h
+@@ -299,6 +299,9 @@
+ 			      struct net_device *dev);
+ void nf_flow_table_cleanup(struct net_device *dev);
+ 
++void flow_offload_teardown_by_tuple(const struct flow_offload_tuple *tuple,
++				    unsigned long cookie);
++
+ int nf_flow_table_init(struct nf_flowtable *flow_table);
+ void nf_flow_table_free(struct nf_flowtable *flow_table);
+ 
+--- a/net/netfilter/nf_flow_table_core.c
++++ b/net/netfilter/nf_flow_table_core.c
+@@ -447,6 +447,76 @@
+ 
+ 	return err;
+ }
++
++struct nf_flow_teardown_tuple {
++	const struct flow_offload_tuple *tuple;
++	unsigned long cookie;
++};
++
++static void nf_flow_teardown_if_tuple(struct nf_flowtable *flow_table,
++				      struct flow_offload *flow, void *data)
++{
++	const struct nf_flow_teardown_tuple *ctx = data;
++	const struct flow_offload_tuple *key = ctx->tuple;
++	int dir;
++
++	for (dir = 0; dir < FLOW_OFFLOAD_DIR_MAX; dir++) {
++		const struct flow_offload_tuple *t = &flow->tuplehash[dir].tuple;
++
++		/* The cookie identifies the exact tuple, including its netns. */
++		if ((unsigned long)t != ctx->cookie ||
++		    t->l3proto != key->l3proto || t->l4proto != key->l4proto ||
++		    t->src_port != key->src_port || t->dst_port != key->dst_port)
++			continue;
++
++		switch (key->l3proto) {
++		case AF_INET:
++			if (t->src_v4.s_addr != key->src_v4.s_addr ||
++			    t->dst_v4.s_addr != key->dst_v4.s_addr)
++				continue;
++			break;
++		case AF_INET6:
++			if (!ipv6_addr_equal(&t->src_v6, &key->src_v6) ||
++			    !ipv6_addr_equal(&t->dst_v6, &key->dst_v6))
++				continue;
++			break;
++		default:
++			return;
++		}
++
++		flow_offload_teardown(flow);
++		return;
++	}
++}
++
++/**
++ * flow_offload_teardown_by_tuple - tear down a hardware flow's owner
++ * @tuple: L3/L4 addresses, ports and protocols from the hardware rule
++ * @cookie: opaque cookie supplied with FLOW_CLS_REPLACE
++ *
++ * Match either direction without requiring the ingress interface or VLAN
++ * metadata that hardware may not retain. The cookie is compared against live
++ * tuples, never dereferenced. Checking the L3/L4 key also rejects stale cookies
++ * whose address has been reused for an unrelated flow.
++ *
++ * Context: Process context. Call without holding driver offload locks, since
++ * netfilter cleanup holds flowtable_lock while draining driver callbacks.
++ */
++void flow_offload_teardown_by_tuple(const struct flow_offload_tuple *tuple,
++				    unsigned long cookie)
++{
++	struct nf_flow_teardown_tuple ctx = { .tuple = tuple, .cookie = cookie };
++	struct nf_flowtable *flowtable;
++
++	if (!tuple || !cookie)
++		return;
++
++	mutex_lock(&flowtable_lock);
++	list_for_each_entry(flowtable, &flowtables, list)
++		nf_flow_table_iterate(flowtable, nf_flow_teardown_if_tuple, &ctx);
++	mutex_unlock(&flowtable_lock);
++}
++EXPORT_SYMBOL_GPL(flow_offload_teardown_by_tuple);
+ 
+ static bool nf_flow_custom_gc(struct nf_flowtable *flow_table,
+ 			      const struct flow_offload *flow)

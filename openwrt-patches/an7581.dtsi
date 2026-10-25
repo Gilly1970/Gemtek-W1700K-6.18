@@ -30,6 +30,15 @@
 			reg = <0x0 0x84000000 0x0 0xa00000>;
 		};
 
+		/* NPU V2 can only address the first 1 GiB of DRAM: mailbox + mt76 coherent buffers. */
+		npu_dma: npu-dma {
+			compatible = "shared-dma-pool";
+			no-map;
+			size = <0x0 0x1000000>;
+			alignment = <0x0 0x100000>;
+			alloc-ranges = <0x0 0x80000000 0x0 0x40000000>;
+		};
+
 		qdma0_buf: qdma0-buf@87000000 {
 			no-map;
 			reg = <0x0 0x87000000 0x0 0x2000000>;
@@ -885,8 +894,8 @@
 				     <GIC_SPI 121 IRQ_TYPE_LEVEL_HIGH>,
 				     <GIC_SPI 122 IRQ_TYPE_LEVEL_HIGH>,
 				     <GIC_SPI 123 IRQ_TYPE_LEVEL_HIGH>;
-			memory-region = <&npu_binary>;
-			memory-region-names = "binary";
+			memory-region = <&npu_binary>, <&npu_dma>;
+			memory-region-names = "binary", "dma";
 
 			status = "disabled";
 		};
