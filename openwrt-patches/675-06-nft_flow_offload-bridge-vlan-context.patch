@@ -17,6 +17,8 @@ Signed-off-by: Gilly <gilroyscott1970@gmail.com>
  now takes a net_device_path_ctx). The dev.c/netdevice.h __dev_fill_forward_path
  split is gone; nft_dev_fill_forward_path() takes the caller's ctx and the
  .ieee80211 flag from 706-02 moves into the ctx built by nft_dev_forward_path().]
+[2026-10-26: refreshed onto the rebased 675-05 (upstream 706-03): the ctx is
+ now passed into the combined fill/path_info bail-out check.]
 ---
 diff --git a/net/netfilter/nf_flow_table_path.c b/net/netfilter/nf_flow_table_path.c
 --- a/net/netfilter/nf_flow_table_path.c
@@ -113,7 +115,7 @@ diff --git a/net/netfilter/nf_flow_table_path.c b/net/netfilter/nf_flow_table_pa
  }
  
  struct nft_forward_info {
-@@ -238,6 +258,21 @@ static bool nft_flowtable_find_dev(const struct net_device *dev,
+@@ -237,6 +257,21 @@ static bool nft_flowtable_find_dev(const struct net_device *dev,
  	return found;
  }
  
@@ -135,7 +137,7 @@ diff --git a/net/netfilter/nf_flow_table_path.c b/net/netfilter/nf_flow_table_pa
  static int nft_dev_forward_path(const struct nft_pktinfo *pkt,
  				struct nf_flow_route *route,
  				const struct nf_conn *ct,
-@@ -245,6 +280,10 @@ static int nft_dev_forward_path(const struct nft_pktinfo *pkt,
+@@ -244,6 +279,10 @@ static int nft_dev_forward_path(const struct nft_pktinfo *pkt,
  				struct nft_flowtable *ft)
  {
  	const struct dst_entry *dst = route->tuple[dir].dst;
@@ -146,7 +148,7 @@ diff --git a/net/netfilter/nf_flow_table_path.c b/net/netfilter/nf_flow_table_pa
  	struct net_device_path_stack stack;
  	struct nft_forward_info info = {};
  	enum ip_conntrack_dir skb_dir;
-@@ -259,6 +298,9 @@ static int nft_dev_forward_path(const struct nft_pktinfo *pkt,
+@@ -258,6 +297,9 @@ static int nft_dev_forward_path(const struct nft_pktinfo *pkt,
  	 */
  	if (nft_flow_offload_is_bridging(pkt->skb) &&
  	    skb_mac_header_was_set(pkt->skb)) {
@@ -156,7 +158,7 @@ diff --git a/net/netfilter/nf_flow_table_path.c b/net/netfilter/nf_flow_table_pa
  		eth = eth_hdr(pkt->skb);
  		skb_dir = CTINFO2DIR(skb_get_nfct(pkt->skb) & NFCT_INFOMASK);
  		if (skb_dir != dir) {
-@@ -268,9 +310,36 @@ static int nft_dev_forward_path(const struct nft_pktinfo *pkt,
+@@ -267,9 +309,36 @@ static int nft_dev_forward_path(const struct nft_pktinfo *pkt,
  			memcpy(ha, eth->h_dest, ETH_ALEN);
  			memcpy(info.h_source, eth->h_source, ETH_ALEN);
  		}
@@ -189,8 +191,8 @@ diff --git a/net/netfilter/nf_flow_table_path.c b/net/netfilter/nf_flow_table_pa
 +		}
  	}
  
--	if (nft_dev_fill_forward_path(route, dst, ct, dir, ha, &stack) >= 0)
-+	if (nft_dev_fill_forward_path(&ctx, dst, ct, dir, ha, &stack) >= 0)
- 		nft_dev_path_info(&stack, &info, ha, &ft->data);
+-	if (nft_dev_fill_forward_path(route, dst, ct, dir, ha, &stack) < 0 ||
++	if (nft_dev_fill_forward_path(&ctx, dst, ct, dir, ha, &stack) < 0 ||
+ 	    nft_dev_path_info(&stack, &info, ha, &ft->data) < 0)
+ 		return -ENOENT;
  
- 	if (info.outdev)
