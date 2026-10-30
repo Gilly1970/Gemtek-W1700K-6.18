@@ -1,5 +1,4 @@
 an7581.mk:target/linux/airoha/image/an7581.mk
-bridger-Makefile:package/network/services/bridger/Makefile
 config-6.18:target/linux/airoha/an7581/config-6.18
 feeds/luci/modules/luci-mod-network/patches/997-luci-wireless-eht320-block-select.patch
 feeds/luci/modules/luci-mod-status/patches/998-luci-channel-analysis-single-wiphy-multiradio.patch
