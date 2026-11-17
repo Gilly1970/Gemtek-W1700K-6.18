@@ -1,0 +1,96 @@
+From: Chris Scott <gilroyscott1970@gmail.com>
+Date: Thu, 12 Nov 2026 12:00:00 +1000
+Subject: [PATCH] TEST: net: airoha: npu: v1 review changes (Lorenzo)
+
+TEMPORARY on-device test of the changes queued for the net-next v1
+series, applied on top of 924 (coherent mailbox) + 951 (pool):
+
+- 2/3: move the firmware region lookup and the "dma" pool attach into
+  airoha_npu_reserve_mem_region(); the pool now attaches before
+  dma_set_mask_and_coherent().
+- 3/3: airoha_npu_send_msg() no longer copies the reply back (NULL, 0);
+  airoha_npu_ppe_stats_setup(), the only SET caller that reads the
+  reply, calls __airoha_npu_send_msg() with ppe_data as reply buffer.
+
+Result is functionally identical to the net-next v1 working tree.
+Remove after the test (fold into 951 or drop when upstream lands).
+---
+--- a/drivers/net/ethernet/airoha/airoha_npu.c	2026-11-12 19:56:36.186590049 +1000
++++ b/drivers/net/ethernet/airoha/airoha_npu.c	2026-11-12 19:56:36.202145041 +1000
+@@ -219,7 +219,7 @@
+ static int airoha_npu_send_msg(struct airoha_npu *npu, int func_id,
+ 			       void *data, int len)
+ {
+-	return __airoha_npu_send_msg(npu, func_id, data, len, data, len);
++	return __airoha_npu_send_msg(npu, func_id, data, len, NULL, 0);
+ }
+ 
+ static int airoha_npu_load_firmware(struct device *dev, void __iomem *addr,
+@@ -470,8 +470,9 @@
+ 	ppe_data->func_id = PPE_FUNC_SET_WAIT_FLOW_STATS_SETUP;
+ 	ppe_data->stats_info.foe_stats_addr = foe_stats_addr;
+ 
+-	err = airoha_npu_send_msg(npu, NPU_FUNC_PPE, ppe_data,
+-				  sizeof(*ppe_data));
++	err = __airoha_npu_send_msg(npu, NPU_FUNC_PPE, ppe_data,
++				    sizeof(*ppe_data), ppe_data,
++				    sizeof(*ppe_data));
+ 	if (err)
+ 		goto out;
+ 
+@@ -722,6 +723,26 @@
+ 	of_reserved_mem_device_release(data);
+ }
+ 
++static int airoha_npu_reserve_mem_region(struct device *dev,
++					 struct resource *res)
++{
++	int err;
++
++	err = of_reserved_mem_region_to_resource(dev->of_node, 0, res);
++	if (err)
++		return err;
++
++	if (of_property_match_string(dev->of_node, "memory-region-names",
++				     "dma") < 0)
++		return 0;
++
++	err = of_reserved_mem_device_init_by_name(dev, dev->of_node, "dma");
++	if (err)
++		return err;
++
++	return devm_add_action_or_reset(dev, airoha_npu_rmem_release, dev);
++}
++
+ static int airoha_npu_probe(struct platform_device *pdev)
+ {
+ 	struct device *dev = &pdev->dev;
+@@ -758,7 +779,7 @@
+ 	if (IS_ERR(npu->regmap))
+ 		return PTR_ERR(npu->regmap);
+ 
+-	err = of_reserved_mem_region_to_resource(dev->of_node, 0, &res);
++	err = airoha_npu_reserve_mem_region(dev, &res);
+ 	if (err)
+ 		return err;
+ 
+@@ -805,19 +826,6 @@
+ 	if (err)
+ 		return err;
+ 
+-	if (of_property_match_string(dev->of_node, "memory-region-names",
+-				     "dma") >= 0) {
+-		err = of_reserved_mem_device_init_by_name(dev, dev->of_node,
+-							  "dma");
+-		if (err)
+-			return err;
+-
+-		err = devm_add_action_or_reset(dev, airoha_npu_rmem_release,
+-					       dev);
+-		if (err)
+-			return err;
+-	}
+-
+ 	for (i = 0; i < ARRAY_SIZE(npu->cores); i++) {
+ 		struct airoha_npu_core *core = &npu->cores[i];
+ 
