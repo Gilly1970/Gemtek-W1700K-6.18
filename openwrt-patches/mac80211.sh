@@ -112,7 +112,7 @@ function setup_phy(phy, config, data) {
 		rxantenna: config.rxantenna
 	});
 
-	if (config.txpower)
+	if (config.txpower != null)
 		config.txpower = 'fixed ' + config.txpower + '00';
 	else
 		config.txpower = 'auto';
@@ -403,7 +403,7 @@ function setup() {
 			if (mode != "ap")
 				data.config.noscan = true;
 			validate('iface', v.config);
-			iface.prepare(v.config, data.phy + data.phy_suffix, data.config.num_global_macaddr, data.config.macaddr_base);
+			iface.prepare(v.config);
 			netifd.set_vif(k, v.config.ifname);
 			break;
 		}
@@ -458,15 +458,12 @@ function setup() {
 		wdev_data[v.config.ifname] = config;
 	}
 
-	for (let ifname in active_ifnames) {
-		if (!wdev_data[ifname])
-			continue;
-
-		let if_config = {
-			[ifname]: wdev_data[ifname]
-		};
-		system(`ucode /usr/share/hostap/wdev.uc ${data.phy}${data.phy_suffix} set_config '${if_config}'`);
-	}
+	system([
+		"ucode", "/usr/share/hostap/wdev.uc", data.phy + data.phy_suffix, "set_config",
+		sprintf("%J", wdev_data),
+		`num_global=${data.config.num_global_macaddr ?? ""}`,
+		`macaddr_base=${data.config.macaddr_base ?? ""}`,
+	]);
 
 	if (fs.access('/usr/sbin/wpa_supplicant', 'x'))
 		supplicant.setup(supplicant_data, data);
